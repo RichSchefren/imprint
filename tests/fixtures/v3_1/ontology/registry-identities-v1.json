@@ -1,0 +1,10 @@
+{
+  "binding_contract": "imprint.ontology.binding/3.7.0",
+  "core_node_count": 8,
+  "core_predicate_count": 54,
+  "core_qualifier_count": 30,
+  "endpoint_union_count": 13,
+  "business_node_count": 11,
+  "business_predicate_count": 23,
+  "business_qualifier_count": 4
+}

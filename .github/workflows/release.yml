@@ -1,0 +1,78 @@
+name: Protected v3.1 release
+
+on:
+  push:
+    tags: ["v3.1.1"]
+
+permissions:
+  contents: read
+
+jobs:
+  exact-tag:
+    name: Exact protected tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject every ref except v3.1.1
+        run: test "${GITHUB_REF}" = refs/tags/v3.1.1
+
+  quality-gates:
+    name: Full tests and native platform acceptance
+    needs: exact-tag
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  attest:
+    name: Attest the exact accepted subjects
+    needs: quality-gates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: imprint-release-candidate
+          path: candidate
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: candidate/imprint-3.1.1.tar.gz
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: candidate/imprint-3.1.1.zip
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: candidate/SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: attested-v3.1.1-subjects
+          path: |
+            candidate/imprint-3.1.1.tar.gz
+            candidate/imprint-3.1.1.zip
+            candidate/SHA256SUMS
+          if-no-files-found: error
+
+  publish:
+    name: Publish only the accepted and attested subjects
+    needs: attest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: attested-v3.1.1-subjects
+          path: subjects
+      - name: Publish without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v3.1.1 \
+            subjects/imprint-3.1.1.tar.gz \
+            subjects/imprint-3.1.1.zip \
+            subjects/SHA256SUMS \
+            --repo "${GITHUB_REPOSITORY}" \
+            --verify-tag \
+            --title "Imprint v3.1.1" \
+            --notes "Attested Imprint v3.1.1 release."

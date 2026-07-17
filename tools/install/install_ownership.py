@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Record and enforce the exact files owned by an Imprint installation."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import stat
+from importlib.metadata import PackageNotFoundError, version as distribution_version
+from pathlib import Path, PurePosixPath
+import runpy
+
+MARKER = ".imprint-install-root"
+MANIFEST = ".imprint-owned-files.json"
+ROOT = Path(__file__).resolve().parents[2]
+repository_version = ROOT / "src" / "imprint" / "_version.py"
+staged_version = Path(__file__).resolve().with_name("_version.py")
+source_version = staged_version if staged_version.is_file() else repository_version
+if source_version.is_file():
+    # Repository execution must use the authoritative source file, even when
+    # the invoking environment has older editable package metadata installed.
+    # An uninstaller may also stage this ownership tool outside the installed
+    # venv so Windows can remove the running venv executable. In that case it
+    # stages the already ownership-verified canonical _version.py beside this
+    # file, preserving the same closed version authority without relying on
+    # ambient base-interpreter metadata.
+    VERSION = str(runpy.run_path(str(source_version))["__version__"])
+else:
+    # Installed copies use the wheel's canonical distribution metadata and do
+    # not depend on package import paths or repository layout.
+    try:
+        VERSION = distribution_version("imprint-local")
+    except PackageNotFoundError:
+        raise RuntimeError("Imprint version metadata is unavailable")
+SUPPORTED_VERSIONS = ("3.0.0", "3.0.1", "3.1.0", VERSION)
+
+
+def _digest(path: Path) -> str:
+    value = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def _root(value: str) -> Path:
+    root = Path(value).expanduser().resolve(strict=True)
+    if root == Path(root.anchor) or root == Path.home().resolve():
+        raise SystemExit(f"refusing unsafe install root: {root}")
+    if root.is_symlink() or not root.is_dir():
+        raise SystemExit(f"install root must be a real directory: {root}")
+    return root
+
+
+def _entry(path: Path, root: Path) -> dict[str, str]:
+    relative = path.relative_to(root).as_posix()
+    mode = path.lstat().st_mode
+    if stat.S_ISLNK(mode):
+        return {"path": relative, "type": "symlink", "target": os.readlink(path)}
+    if stat.S_ISREG(mode):
+        return {"path": relative, "type": "file", "sha256": _digest(path)}
+    if stat.S_ISDIR(mode):
+        return {"path": relative, "type": "directory"}
+    raise SystemExit(f"unsupported installed file type: {relative}")
+
+
+def record(root: Path) -> None:
+    entries = [
+        _entry(path, root)
+        for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix())
+        if path.name not in {MARKER, MANIFEST}
+        and not _is_runtime_cache(path.relative_to(root).as_posix())
+    ]
+    payload = {"format": 1, "product": "imprint-local", "version": VERSION, "entries": entries}
+    destination = root / MANIFEST
+    temporary = root / f"{MANIFEST}.tmp"
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temporary, destination)
+
+
+def _closed_version(value: str) -> str:
+    if value not in SUPPORTED_VERSIONS:
+        raise SystemExit(f"unsupported install ownership version: {value}")
+    return value
+
+
+def _load(root: Path, expected_version: str = VERSION) -> list[dict[str, str]]:
+    expected_version = _closed_version(expected_version)
+    payload = json.loads((root / MANIFEST).read_text(encoding="utf-8"))
+    if payload.get("format") != 1 or payload.get("product") != "imprint-local" or payload.get("version") != expected_version:
+        raise SystemExit("ownership manifest identity mismatch")
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        raise SystemExit("ownership manifest entries are invalid")
+    return entries
+
+
+def _is_runtime_cache(relative: str) -> bool:
+    path = PurePosixPath(relative)
+    return "__pycache__" in path.parts and (path.suffix == ".pyc" or path.name == "__pycache__")
+
+
+def verify(root: Path, expected_version: str = VERSION) -> tuple[list[dict[str, str]], list[Path]]:
+    expected_version = _closed_version(expected_version)
+    marker = root / MARKER
+    if not marker.is_file() or marker.read_text(encoding="ascii") != f"imprint-local:{expected_version}\n":
+        raise SystemExit("ownership marker is missing or invalid")
+    entries = _load(root, expected_version)
+    recorded = {entry.get("path") for entry in entries}
+    if None in recorded or len(recorded) != len(entries):
+        raise SystemExit("ownership manifest contains missing or duplicate paths")
+    # v3.0.0 recorded interpreter-generated bytecode. It may legitimately be
+    # rewritten or removed during ordinary hook execution, so it is verified
+    # and removed as disposable runtime cache rather than immutable product code.
+    entries = [entry for entry in entries if not _is_runtime_cache(entry["path"])]
+    expected = {entry["path"] for entry in entries}
+    actual_paths = [path for path in root.rglob("*") if path.name not in {MARKER, MANIFEST}]
+    unrecorded = [path for path in actual_paths if path.relative_to(root).as_posix() not in expected]
+    unexpected = [path for path in unrecorded if not _is_runtime_cache(path.relative_to(root).as_posix())]
+    if unexpected:
+        rendered = "\n".join(f"  {path.relative_to(root).as_posix()}" for path in unexpected[:25])
+        raise SystemExit(f"refusing uninstall because unowned paths exist:\n{rendered}")
+    for entry in entries:
+        relative = entry["path"]
+        path = root / PurePosixPath(relative)
+        if not path.exists() and not path.is_symlink():
+            raise SystemExit(f"owned path is missing: {relative}")
+        actual = _entry(path, root)
+        if actual != entry:
+            raise SystemExit(f"owned path changed since installation: {relative}")
+    return entries, [path for path in unrecorded if _is_runtime_cache(path.relative_to(root).as_posix())]
+
+
+def uninstall(root: Path, expected_version: str = VERSION) -> None:
+    entries, caches = verify(root, expected_version)
+    # Verification completes before the first mutation. Files/symlinks go first.
+    for path in sorted(caches, key=lambda item: len(item.parts), reverse=True):
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+    for entry in reversed(entries):
+        path = root / PurePosixPath(entry["path"])
+        if entry["type"] in {"file", "symlink"}:
+            path.unlink()
+    for path in sorted(caches, key=lambda item: len(item.parts), reverse=True):
+        if path.is_dir():
+            path.rmdir()
+    for entry in sorted((item for item in entries if item["type"] == "directory"), key=lambda item: len(PurePosixPath(item["path"]).parts), reverse=True):
+        (root / PurePosixPath(entry["path"])).rmdir()
+    (root / MANIFEST).unlink()
+    (root / MARKER).unlink()
+    root.rmdir()
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", choices=("record", "verify", "uninstall"))
+    parser.add_argument("--root", required=True)
+    parser.add_argument("--expected-version", choices=SUPPORTED_VERSIONS, default=VERSION)
+    args = parser.parse_args()
+    root = _root(args.root)
+    if args.action == "record":
+        record(root)
+    elif args.action == "verify":
+        verify(root, args.expected_version)
+    else:
+        uninstall(root, args.expected_version)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

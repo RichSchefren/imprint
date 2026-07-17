@@ -1,0 +1,9 @@
+{
+  "hook_schema_version": "1.0.0",
+  "hooks": [
+    {"event": "SessionStart", "source": "session_start.py", "purpose": "bounded_core_general_retrieval"},
+    {"event": "UserPromptSubmit", "source": "user_prompt_submit.py", "purpose": "deterministic_domain_injection"},
+    {"event": "Stop", "source": "stop_capture.py", "purpose": "explicit_feedback_capture"},
+    {"event": "SessionStart", "source": "health_check.py", "purpose": "content_free_health"}
+  ]
+}

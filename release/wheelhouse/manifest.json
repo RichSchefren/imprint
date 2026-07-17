@@ -1,0 +1,204 @@
+{
+  "platforms": {
+    "linux": [
+      {
+        "path": "release/wheelhouse/linux/cffi-2.0.0-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        "sha256": "3e837e369566884707ddaf85fc1744b47575005c0a229de3327f8f9a20f4efeb"
+      },
+      {
+        "path": "release/wheelhouse/linux/cffi-2.0.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "fc7de24befaeae77ba923797c7c87834c73648a05a4bde34b3b7e5588973a453"
+      },
+      {
+        "path": "release/wheelhouse/linux/cffi-2.0.0-cp311-cp311-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        "sha256": "730cacb21e1bdff3ce90babf007d0a0917cc3e6492f336c2f0134101e0944f93"
+      },
+      {
+        "path": "release/wheelhouse/linux/cffi-2.0.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "8941aaadaf67246224cee8c3803777eed332a19d909b47e29c9842ef1e79ac26"
+      },
+      {
+        "path": "release/wheelhouse/linux/cffi-2.0.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        "sha256": "b21e08af67b8a103c71a250401c78d5e0893beff75e28c53c98f4de42f774062"
+      },
+      {
+        "path": "release/wheelhouse/linux/cffi-2.0.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "3e17ed538242334bf70832644a32a7aae3d83b57567f9fd60a26257e992b79ba"
+      },
+      {
+        "path": "release/wheelhouse/linux/cffi-2.0.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        "sha256": "d48a880098c96020b02d5a1f7d9251308510ce8858940e6fa99ece33f610838b"
+      },
+      {
+        "path": "release/wheelhouse/linux/cffi-2.0.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "c8d3b5532fc71b7a77c09192b4a5a200ea992702734a2e9279a37f2478236f26"
+      },
+      {
+        "path": "release/wheelhouse/linux/cffi-2.0.0-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        "sha256": "24b6f81f1983e6df8db3adc38562c83f7d4a0c36162885ec7f7b77c7dcbec97b"
+      },
+      {
+        "path": "release/wheelhouse/linux/cffi-2.0.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "afb8db5439b81cf9c9d0c80404b60c3cc9c3add93e114dcae767f1477cb53775"
+      },
+      {
+        "path": "release/wheelhouse/linux/cryptography-48.0.1-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        "sha256": "32143b24adb918f078134e1e230f1eb8cc04886b92c28b5f0041aaf3e5699225"
+      },
+      {
+        "path": "release/wheelhouse/linux/cryptography-48.0.1-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "f0d27a5696721ef7a672b8c810f6aded391058e0b9486e63e6d93baf765da691"
+      },
+      {
+        "path": "release/wheelhouse/linux/cryptography-48.0.1-cp39-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+        "sha256": "48fe40804d4caa2288f24e70ca8c64c42dd826da0ad7e4f1b41b2128d679e6c8"
+      },
+      {
+        "path": "release/wheelhouse/linux/cryptography-48.0.1-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+        "sha256": "86be3b1b0b6bf09482fb50a979c508d2950ed95f5621ec77f4e385962006b83a"
+      },
+      {
+        "path": "release/wheelhouse/linux/imprint_local-3.1.1-py3-none-any.whl",
+        "sha256": "0e72cfe1c612e0c3cd11a73cc3661b7a83bf55a25be49f8f3b901339496f64e1"
+      },
+      {
+        "path": "release/wheelhouse/linux/pycparser-3.0-py3-none-any.whl",
+        "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"
+      },
+      {
+        "path": "release/wheelhouse/linux/rfc8785-0.1.4-py3-none-any.whl",
+        "sha256": "520d690b448ecf0703691c76e1a34a24ddcd4fc5bc41d589cb7c58ec651bcd48"
+      },
+      {
+        "path": "release/wheelhouse/linux/typing_extensions-4.16.0-py3-none-any.whl",
+        "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+      },
+      {
+        "path": "requirements/runtime-linux.lock",
+        "sha256": "9e690c3a81e05f4d0e29d843b57a75ea76fc3ae2f7ffc7e7751840f9c3d8145e"
+      }
+    ],
+    "macos": [
+      {
+        "path": "release/wheelhouse/macos/cffi-2.0.0-cp310-cp310-macosx_10_13_x86_64.whl",
+        "sha256": "0cf2d91ecc3fcc0625c2c530fe004f82c110405f101548512cce44322fa8ac44"
+      },
+      {
+        "path": "release/wheelhouse/macos/cffi-2.0.0-cp310-cp310-macosx_11_0_arm64.whl",
+        "sha256": "f73b96c41e3b2adedc34a7356e64c8eb96e03a3782b535e043a986276ce12a49"
+      },
+      {
+        "path": "release/wheelhouse/macos/cffi-2.0.0-cp311-cp311-macosx_10_13_x86_64.whl",
+        "sha256": "b4c854ef3adc177950a8dfc81a86f5115d2abd545751a304c5bcf2c2c7283cfe"
+      },
+      {
+        "path": "release/wheelhouse/macos/cffi-2.0.0-cp311-cp311-macosx_11_0_arm64.whl",
+        "sha256": "2de9a304e27f7596cd03d16f1b7c72219bd944e99cc52b84d0145aefb07cbd3c"
+      },
+      {
+        "path": "release/wheelhouse/macos/cffi-2.0.0-cp312-cp312-macosx_10_13_x86_64.whl",
+        "sha256": "6d02d6655b0e54f54c4ef0b94eb6be0607b70853c45ce98bd278dc7de718be5d"
+      },
+      {
+        "path": "release/wheelhouse/macos/cffi-2.0.0-cp312-cp312-macosx_11_0_arm64.whl",
+        "sha256": "8eca2a813c1cb7ad4fb74d368c2ffbbb4789d377ee5bb8df98373c2cc0dee76c"
+      },
+      {
+        "path": "release/wheelhouse/macos/cffi-2.0.0-cp313-cp313-macosx_10_13_x86_64.whl",
+        "sha256": "00bdf7acc5f795150faa6957054fbbca2439db2f775ce831222b66f192f03beb"
+      },
+      {
+        "path": "release/wheelhouse/macos/cffi-2.0.0-cp313-cp313-macosx_11_0_arm64.whl",
+        "sha256": "45d5e886156860dc35862657e1494b9bae8dfa63bf56796f2fb56e1679fc0bca"
+      },
+      {
+        "path": "release/wheelhouse/macos/cffi-2.0.0-cp314-cp314-macosx_10_13_x86_64.whl",
+        "sha256": "fc33c5141b55ed366cfaad382df24fe7dcbc686de5be719b207bb248e3053dc5"
+      },
+      {
+        "path": "release/wheelhouse/macos/cffi-2.0.0-cp314-cp314-macosx_11_0_arm64.whl",
+        "sha256": "c654de545946e0db659b3400168c9ad31b5d29593291482c43e3564effbcee13"
+      },
+      {
+        "path": "release/wheelhouse/macos/cryptography-48.0.1-cp311-abi3-macosx_10_9_universal2.whl",
+        "sha256": "3e4a1a3232eef2e6c732827d5722db29a0cc8b27af2a4d865b094cf954be9ca1"
+      },
+      {
+        "path": "release/wheelhouse/macos/cryptography-48.0.1-cp39-abi3-macosx_10_9_universal2.whl",
+        "sha256": "4fdc69f8e4316bcf0c8c8ec1f26f285d12e8142d88d96c876a59a03be3f6ae67"
+      },
+      {
+        "path": "release/wheelhouse/macos/imprint_local-3.1.1-py3-none-any.whl",
+        "sha256": "0e72cfe1c612e0c3cd11a73cc3661b7a83bf55a25be49f8f3b901339496f64e1"
+      },
+      {
+        "path": "release/wheelhouse/macos/pycparser-3.0-py3-none-any.whl",
+        "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"
+      },
+      {
+        "path": "release/wheelhouse/macos/rfc8785-0.1.4-py3-none-any.whl",
+        "sha256": "520d690b448ecf0703691c76e1a34a24ddcd4fc5bc41d589cb7c58ec651bcd48"
+      },
+      {
+        "path": "release/wheelhouse/macos/typing_extensions-4.16.0-py3-none-any.whl",
+        "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+      },
+      {
+        "path": "requirements/runtime-macos.lock",
+        "sha256": "9634ca96685d1a993e448f5023252d2e61a5b5143007a5bfcce64c15868807e4"
+      }
+    ],
+    "windows": [
+      {
+        "path": "release/wheelhouse/windows/cffi-2.0.0-cp310-cp310-win_amd64.whl",
+        "sha256": "b18a3ed7d5b3bd8d9ef7a8cb226502c6bf8308df1525e1cc676c3680e7176739"
+      },
+      {
+        "path": "release/wheelhouse/windows/cffi-2.0.0-cp311-cp311-win_amd64.whl",
+        "sha256": "66f011380d0e49ed280c789fbd08ff0d40968ee7b665575489afa95c98196ab5"
+      },
+      {
+        "path": "release/wheelhouse/windows/cffi-2.0.0-cp312-cp312-win_amd64.whl",
+        "sha256": "da68248800ad6320861f129cd9c1bf96ca849a2771a59e0344e88681905916f5"
+      },
+      {
+        "path": "release/wheelhouse/windows/cffi-2.0.0-cp313-cp313-win_amd64.whl",
+        "sha256": "19f705ada2530c1167abacb171925dd886168931e0a7b78f5bffcae5c6b5be75"
+      },
+      {
+        "path": "release/wheelhouse/windows/cffi-2.0.0-cp314-cp314-win_amd64.whl",
+        "sha256": "203a48d1fb583fc7d78a4c6655692963b860a417c0528492a6bc21f1aaefab25"
+      },
+      {
+        "path": "release/wheelhouse/windows/cryptography-48.0.1-cp311-abi3-win_amd64.whl",
+        "sha256": "39489bfca54c7a1f6b297efcd8bc608ab92d16c4ca631b0cad4da46724588b24"
+      },
+      {
+        "path": "release/wheelhouse/windows/cryptography-48.0.1-cp39-abi3-win_amd64.whl",
+        "sha256": "9a49ca6c81417f6a5edb50375a60cccdd70fa0a91a5211829dbea74eba94d2ac"
+      },
+      {
+        "path": "release/wheelhouse/windows/imprint_local-3.1.1-py3-none-any.whl",
+        "sha256": "0e72cfe1c612e0c3cd11a73cc3661b7a83bf55a25be49f8f3b901339496f64e1"
+      },
+      {
+        "path": "release/wheelhouse/windows/pycparser-3.0-py3-none-any.whl",
+        "sha256": "b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"
+      },
+      {
+        "path": "release/wheelhouse/windows/rfc8785-0.1.4-py3-none-any.whl",
+        "sha256": "520d690b448ecf0703691c76e1a34a24ddcd4fc5bc41d589cb7c58ec651bcd48"
+      },
+      {
+        "path": "release/wheelhouse/windows/typing_extensions-4.16.0-py3-none-any.whl",
+        "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+      },
+      {
+        "path": "requirements/runtime-windows.lock",
+        "sha256": "ebae86f37d27c22232fde9bb53e34eefc3224f4a7fcb16a2effccbf1879c2ce4"
+      }
+    ]
+  },
+  "product_version": "3.1.1",
+  "schema_version": "1.0.0"
+}

@@ -1,0 +1,19 @@
+{
+  "compiler": true,
+  "allow_higher_budget": false,
+  "config_version": "3.1.1",
+  "context_budget_bytes": 32768,
+  "spool_retention_days": 30,
+  "data_root": "/absolute/local/path/for/imprint-data",
+  "domains": [
+    {
+      "domain_id": "example-domain",
+      "frozen": false,
+      "keywords": ["example keyword"],
+      "public_label": "Example Domain",
+      "safe_paths": ["Projects/Example"]
+    }
+  ],
+  "node_id": "primary",
+  "operator_slug": "default"
+}
