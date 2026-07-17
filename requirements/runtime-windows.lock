@@ -1,5 +1,5 @@
 imprint-local==3.1.1 \
-    --hash=sha256:0e72cfe1c612e0c3cd11a73cc3661b7a83bf55a25be49f8f3b901339496f64e1
+    --hash=sha256:6cb33bfd7d5ca47f5759c1eab3f75fe7ee43893bdfd1ed544886902d8a3918dc
 cryptography==48.0.1 \
     --hash=sha256:39489bfca54c7a1f6b297efcd8bc608ab92d16c4ca631b0cad4da46724588b24 \
     --hash=sha256:9a49ca6c81417f6a5edb50375a60cccdd70fa0a91a5211829dbea74eba94d2ac
