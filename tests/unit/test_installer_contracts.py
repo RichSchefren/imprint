@@ -10,6 +10,20 @@ def _read(relative: str) -> str:
     return (ROOT / relative).read_text(encoding="utf-8")
 
 
+def test_byte_pinned_installer_inputs_force_lf_git_checkouts():
+    attributes = {
+        line.strip()
+        for line in _read(".gitattributes").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert {
+        "tools/install/verify_wheelhouse.py text eol=lf",
+        "release/wheelhouse/manifest.json text eol=lf",
+        "release/wheelhouse/manifest.sha256 text eol=lf",
+        "requirements/runtime-*.lock text eol=lf",
+    } <= attributes
+
+
 def test_posix_installer_rejects_unsafe_adoption_and_only_chmods_created_roots():
     source = _read("install/install.sh")
     assert "Refusing to adopt a non-private pre-existing Imprint directory" in source

@@ -1,0 +1,6 @@
+# These files participate in byte-for-byte installer integrity checks.
+# Keep their repository bytes unchanged on Git-for-Windows checkouts.
+tools/install/verify_wheelhouse.py text eol=lf
+release/wheelhouse/manifest.json text eol=lf
+release/wheelhouse/manifest.sha256 text eol=lf
+requirements/runtime-*.lock text eol=lf
