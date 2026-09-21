@@ -1219,6 +1219,7 @@ def main(argv: list[str] | None = None) -> int:
                 output_format="audit" if args.audit else "compact",
                 authority_mode=args.authority_mode,
                 ontology_partitions=args.partitions,
+                selector_config=config.get("selector"),
             )
             if not args.refresh and result.get("status") == "delivered":
                 _emit_retrieval_json(
@@ -1257,6 +1258,7 @@ def main(argv: list[str] | None = None) -> int:
                     store, root=root, session_id=session, prompt="",
                     budget=int(config["context_budget_bytes"]),
                     refresh=context_was_reset,
+                    selector_config=config.get("selector"),
                 )
                 response = {
                     "hook_schema_version": "1.0.0",
@@ -1297,6 +1299,7 @@ def main(argv: list[str] | None = None) -> int:
                     store, root=root, session_id=session,
                     prompt=prompt, explicit_domain=domain,
                     budget=int(config["context_budget_bytes"]), domain_only=True,
+                    selector_config=config.get("selector"),
                 )
                 response = {
                     "hook_schema_version": "1.0.0",

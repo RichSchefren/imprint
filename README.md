@@ -320,3 +320,13 @@ Artifact acceptance runs from extracted archives, not the checkout. CI includes
 
 Imprint is available under the [MIT License](LICENSE). Never attach a live bank,
 database, spool, export, or config to a public issue. See [SECURITY.md](SECURITY.md).
+
+## Optional Jev selector
+
+Core operation stays offline by default. The optional Jev selector is opt-in
+with `selector.mode: "jev"`. When enabled, the current turn and the principle
+text of prefiltered candidate entries are sent to the configured Jev endpoint.
+No store contents beyond those candidate texts are sent, and no session IDs are
+sent. A missing key, timeout, or endpoint failure uses the normal deterministic
+retrieval instead. Jev selections include their score, rank, and the entry's
+provenance.

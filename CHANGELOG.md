@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.2.0 — 2026-09-20
+
+- Add an optional, fail-open Jev relevance selector; deterministic offline retrieval remains the default.
+
 ## 3.1.2 — 2026-08-10
 
 - Fix the Windows installer writing `config.json` with a UTF-8 BOM under Windows

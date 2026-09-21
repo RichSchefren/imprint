@@ -21,7 +21,7 @@ def test_runtime_and_build_metadata_share_one_version_source():
     assert project["tool"]["setuptools"]["dynamic"]["version"] == {
         "attr": "imprint._version.__version__"
     }
-    assert PRODUCT_VERSION == __version__ == "3.1.2"
+    assert PRODUCT_VERSION == __version__ == "3.2.0"
 
 
 def test_release_and_install_tools_consume_authoritative_version():
