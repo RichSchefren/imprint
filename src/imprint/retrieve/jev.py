@@ -11,7 +11,11 @@ from typing import Any, Sequence
 
 from .models import RetrievalRecord
 
-_STOP = set("the a an and or of to in on for with is are was be it this that as at by from not no do does your you we they their our its if then than so can will into out up about have has had all any more most".split())
+_STOP = frozenset(
+    "the a an and or of to in on for with is are was be it this that as at by from not no do does "
+    "your you we they their our its if then than so can will into out up about have has had all any "
+    "more most".split()
+)
 
 
 def _tokens(value: str) -> set[str]:
@@ -35,21 +39,14 @@ def prefilter(turn_text: str, entries: Sequence[RetrievalRecord], keep: int = 15
     return [item for _, _, item in ranked[:keep]]
 
 
-def _score(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return float(value)
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, dict):
-        for key in ("score", "probability", "p", "noul"):
-            if key in value:
-                return _score(value[key])
-    if isinstance(value, str):
-        try:
-            return float(value.strip())
-        except ValueError:
-            return None
-    return None
+def _score(answer: Any) -> float | None:
+    """Read the documented answer shape: ``{"noul": probability}``."""
+    if not isinstance(answer, dict):
+        return None
+    value = answer.get("noul")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
 
 
 class JevSelector:
@@ -67,10 +64,12 @@ class JevSelector:
             }
             for item in candidates
         }
-        body = {"model": self.model, "question": {"type": "noul", "turn": turn_text[:8000], "criteria": questions}, "questions": questions}
+        body = {"model": self.model, "state": turn_text[:8000], "questions": questions}
         request = urllib.request.Request(
-            self.endpoint, data=json.dumps(body, ensure_ascii=False).encode(),
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, method="POST",
+            self.endpoint,
+            data=json.dumps(body, ensure_ascii=False).encode(),
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            method="POST",
         )
         with urllib.request.urlopen(request, timeout=timeout) as response:
             value = json.loads(response.read().decode("utf-8"))
@@ -78,28 +77,30 @@ class JevSelector:
             raise ValueError("Jev response must be an object")
         return value
 
-    def select(self, turn_text: str, entries: Sequence[RetrievalRecord], top: int = 20,
-               floor: float = 0.55, timeout: float = 3.0, prefilter_keep: int = 150) -> list[tuple[RetrievalRecord, float]] | None:
+    def select(
+        self,
+        turn_text: str,
+        entries: Sequence[RetrievalRecord],
+        top: int = 20,
+        floor: float = 0.55,
+        timeout: float = 3.0,
+        prefilter_keep: int = 150,
+    ) -> list[tuple[RetrievalRecord, float]] | None:
         """Return ranked picks, or None so the caller can use deterministic retrieval."""
         try:
             candidates = prefilter(turn_text, entries, prefilter_keep)
             if not candidates or not os.environ.get(self.api_key_env):
                 return None
-            response = self._request(turn_text, candidates, timeout)
-            answers = response.get("answers", response.get("results", response.get("scores")))
+            answers = self._request(turn_text, candidates, timeout).get("answers")
             if not isinstance(answers, dict):
                 return None
             by_id = {item.record_id: item for item in candidates}
-            scored = [(by_id[item_id], score) for item_id, raw in answers.items()
-                      if item_id in by_id and (score := _score(raw)) is not None and floor <= score <= 1.0]
+            scored = []
+            for record_id, answer in answers.items():
+                score = _score(answer)
+                if record_id in by_id and score is not None and floor <= score <= 1.0:
+                    scored.append((by_id[record_id], score))
             scored.sort(key=lambda value: (-value[1], value[0].record_id.encode("utf-8")))
-            result = []
-            seen = set()
-            for item, score in scored:
-                if item.record_id not in seen:
-                    result.append((item, score)); seen.add(item.record_id)
-                if len(result) >= max(0, top):
-                    break
-            return result
+            return scored[: max(0, top)]
         except Exception:
             return None

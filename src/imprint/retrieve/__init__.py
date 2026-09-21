@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 from typing import Sequence
 
@@ -30,12 +31,43 @@ def _snapshot_id(store) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _jev_result(source, snapshot_id: str, prompt: str, result, jev: dict):
+    """Replace the deterministic result with Jev's picks, or return it unchanged."""
+    picks = JevSelector(
+        endpoint=jev.get("endpoint", "https://openrouter.ai/api/alpha/decisions"),
+        model=jev.get("model", "typesafe/jev-1.13"),
+        api_key_env=jev.get("api_key_env", "OPENROUTER_API_KEY"),
+    ).select(
+        prompt,
+        tuple(source.retrieval_candidates(snapshot_id)),
+        top=jev.get("top", 20),
+        floor=jev.get("score_floor", 0.55),
+        timeout=jev.get("timeout_seconds", 3),
+        prefilter_keep=jev.get("prefilter_keep", 150),
+    )
+    if not picks:
+        return result
+    lines = [
+        f"- {item.ontology_type} ({item.provenance_status}; Jev score={score:.3f}, rank={rank}): {item.text}"
+        for rank, (item, score) in enumerate(picks, 1)
+    ]
+    payload = ("\n".join(lines) + "\n").encode("utf-8")
+    return replace(
+        result,
+        payload=payload,
+        selected_ids=tuple(item.record_id for item, _ in picks),
+        omitted_count=max(0, result.eligible_count - len(picks)),
+        selected_bytes=len(payload),
+    )
+
+
 def retrieve_payload(store, *, root: Path, session_id: str, prompt: str = "", explicit_domain: str | None = None,
                      budget: int = 32 * 1024, refresh: bool = False,
                      domain_only: bool = False,
                      output_format: str = "compact",
                      authority_mode: AuthorityMode = "authoritative",
-                     ontology_partitions: Sequence[str] | None = None, selector_config: dict | None = None) -> dict[str, object]:
+                     ontology_partitions: Sequence[str] | None = None,
+                     selector_config: dict | None = None) -> dict[str, object]:
     """Build one bounded payload per session/snapshot with an atomic receipt."""
     snapshot_id = _snapshot_id(store)
     safe_session = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:24]
@@ -78,18 +110,7 @@ def retrieve_payload(store, *, root: Path, session_id: str, prompt: str = "", ex
     # Jev is strictly opt-in and fail-open. The deterministic result above is
     # retained for every missing-key, network, parse, or timeout failure.
     if selector_config and selector_config.get("mode") == "jev" and prompt:
-        jev = selector_config.get("jev", {})
-        picks = JevSelector(
-            endpoint=jev.get("endpoint", "https://openrouter.ai/api/alpha/decisions"),
-            model=jev.get("model", "typesafe/jev-1.13"),
-            api_key_env=jev.get("api_key_env", "OPENROUTER_API_KEY"),
-        ).select(prompt, tuple(item for item in source.retrieval_candidates(snapshot_id) if item.record_id in set(result.selected_ids) or True), top=jev.get("top", 20), floor=jev.get("score_floor", 0.55), timeout=jev.get("timeout_seconds", 3), prefilter_keep=jev.get("prefilter_keep", 150))
-        if picks:
-            chosen = {item.record_id: (item, score, rank) for rank, (item, score) in enumerate(picks, 1)}
-            lines = []
-            for item, score, rank in (chosen[key] for key in chosen):
-                lines.append(f"- {item.ontology_type} ({item.provenance_status}; Jev score={score:.3f}, rank={rank}): {item.text}")
-            result = result.__class__(payload="\n".join(lines).encode() + b"\n", selected_ids=tuple(chosen), eligible_count=result.eligible_count, omitted_count=max(0, result.eligible_count-len(chosen)), selected_bytes=len("\n".join(lines).encode())+1, budget_bytes=result.budget_bytes, section_bytes=result.section_bytes, tokenizer_version=result.tokenizer_version, authority_mode=result.authority_mode, requested_partitions=result.requested_partitions, selected_by_partition=result.selected_by_partition)
+        result = _jev_result(source, snapshot_id, prompt, result, selector_config.get("jev", {}))
     response: dict[str, object] = {
         "status": "delivered",
         "snapshot_id": snapshot_id,
