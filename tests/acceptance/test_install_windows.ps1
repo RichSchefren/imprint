@@ -55,7 +55,7 @@ try {
     $refused = $false
     try { & (Join-Path $ArtifactRoot "install\uninstall.ps1") -InstallRoot $Unowned -Config $Config -Settings $Settings } catch { $refused = $true }
     if (-not $refused -or -not (Test-Path (Join-Path $Unowned "sentinel.txt"))) { throw "Uninstaller accepted or damaged an unowned root." }
-    $Wheel = Get-ChildItem (Join-Path $ArtifactRoot "dist") -Filter "imprint_local-3.1.2-*.whl" | Select-Object -First 1
+    $Wheel = Get-ChildItem (Join-Path $ArtifactRoot "dist") -Filter "imprint_local-3.2.0-*.whl" | Select-Object -First 1
     $ValidWheel = "$($Wheel.FullName).valid"
     Move-Item $Wheel.FullName $ValidWheel
     Set-Content $Wheel.FullName "not-a-wheel"
@@ -94,7 +94,7 @@ try {
     if (Test-Path (Join-Path $InstallRoot "legacy-owned.txt")) { throw "3.0.0 owned application survived upgrade." }
     & (Join-Path $ArtifactRoot "install\install.ps1") -InstallRoot $InstallRoot -Config $Config -Settings $Settings -DataRoot $Data
     $Version = & $Launcher version
-    if ($LASTEXITCODE -ne 0 -or $Version -ne "3.1.2") { throw "Owned launcher was not callable." }
+    if ($LASTEXITCODE -ne 0 -or $Version -ne "3.2.0") { throw "Owned launcher was not callable." }
     & $Launcher --help | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Owned launcher help failed." }
     $BackupPattern = (Split-Path -Leaf $InstallRoot) + ".imprint-backup.*"

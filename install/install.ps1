@@ -78,12 +78,13 @@ if (Test-Path $InstallRoot) {
         elseif ($MarkerText -eq "imprint-local:3.1.0`n") { $ExistingVersion = "3.1.0" }
         elseif ($MarkerText -eq "imprint-local:3.1.1`n") { $ExistingVersion = "3.1.1" }
         elseif ($MarkerText -eq "imprint-local:3.1.2`n") { $ExistingVersion = "3.1.2" }
+        elseif ($MarkerText -eq "imprint-local:$ProductVersion`n") { $ExistingVersion = $ProductVersion }
         else { throw "Refusing an unsupported Imprint install version: $MarkerText" }
         & $Python (Join-Path $ArtifactRoot "tools\install\install_ownership.py") verify --root $InstallRoot --expected-version $ExistingVersion
         if ($LASTEXITCODE -ne 0) { throw "Existing installation ownership verification failed." }
     }
 }
-Write-Warning "Before extraction or execution, verify this complete archive with the full GitHub attestation policy documented for v3.1.2. Internal hashes establish component integrity only, not public provenance."
+Write-Warning "Before extraction or execution, verify this complete archive with the full GitHub attestation policy documented for v$ProductVersion. Internal hashes establish component integrity only, not public provenance."
 $Verifier = Join-Path $ArtifactRoot "tools\install\verify_wheelhouse.py"
 $ExpectedVerifierSha256 = "783a44343f848e969869242e488d14485dfd851c9e2018debe18c2eeab8ff9d5"
 $ManifestDigestFile = Join-Path $ArtifactRoot "release\wheelhouse\manifest.sha256"

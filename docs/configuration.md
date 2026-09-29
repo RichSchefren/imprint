@@ -72,3 +72,14 @@ text at the configured endpoint. `top`, `score_floor`, `timeout_seconds`, and
 `prefilter_keep` control selection. The context byte budget applies to the
 ordinary fallback; Jev selections are injected in full. A missing key, timeout,
 network error, or invalid response falls back to deterministic retrieval.
+
+Jev uses the same authority, provenance, domain, and ontology-partition eligibility
+rules as local retrieval before sending candidates. Prompt hooks can select
+eligible core and general records even when no domain matches; domain records
+still require their selected domain. Already delivered records in the current
+session and snapshot are excluded. A changed prompt can select additional records;
+replaying the same prompt reuses its receipt. Compaction and resume reset these
+receipts because the host context has been reset. Session start remains local.
+For full Jev selections, response `budget_bytes` is the greater of the configured
+fallback budget and the actual selected size, so durable delivery can preserve
+the complete selection. `selected_bytes` and `section_bytes` describe that payload.

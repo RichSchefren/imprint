@@ -58,7 +58,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 Both installers create an isolated virtual environment, write a portable config,
 install an owned `imprint` launcher in the user's command path, register each
 managed hook exactly once, and fail if the installed CLI cannot report version
-`3.1.2`. Re-running the installer is safe and removes duplicate managed hooks
+`3.2.0`. Re-running the installer is safe and removes duplicate managed hooks
 while preserving unrelated hooks. On POSIX, the installer adds one marked PATH
 block to the active shell's login profile (`.zprofile`, `.bash_profile`, or
 `.profile`); uninstall removes that exact owned block and leaves unrelated shell

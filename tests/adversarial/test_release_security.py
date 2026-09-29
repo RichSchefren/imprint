@@ -105,7 +105,7 @@ def test_zip_symlink_is_rejected_by_verifier_and_extractor(tmp_path: Path) -> No
     extractor = load("extract_safe_for_zip", "tools/release/extract_safe.py")
     archive = tmp_path / "hostile.zip"
     with zipfile.ZipFile(archive, "w") as output:
-        item = zipfile.ZipInfo("imprint-3.1.2/link")
+        item = zipfile.ZipInfo("imprint-3.2.0/link")
         item.create_system = 3
         item.external_attr = (stat.S_IFLNK | 0o777) << 16
         output.writestr(item, "../../outside")
@@ -120,7 +120,7 @@ def test_tar_link_and_traversal_are_rejected(tmp_path: Path) -> None:
     extractor = load("extract_safe_for_tar", "tools/release/extract_safe.py")
     link_archive = tmp_path / "link.tar.gz"
     with tarfile.open(link_archive, "w:gz") as output:
-        item = tarfile.TarInfo("imprint-3.1.2/link")
+        item = tarfile.TarInfo("imprint-3.2.0/link")
         item.type = tarfile.SYMTYPE
         item.linkname = "../../outside"
         output.addfile(item)
@@ -145,7 +145,7 @@ def test_ownership_manifest_refuses_unknown_or_mutated_files(tmp_path: Path) -> 
     owned = root / "owned.txt"
     owned.write_text("original", encoding="utf-8")
     ownership.record(root)
-    (root / ownership.MARKER).write_text("imprint-local:3.1.2\n", encoding="ascii")
+    (root / ownership.MARKER).write_text("imprint-local:3.2.0\n", encoding="ascii")
     unknown = root / "unknown.txt"
     unknown.write_text("leave me", encoding="utf-8")
     with pytest.raises(SystemExit, match="unowned paths"):
@@ -166,7 +166,7 @@ def test_ownership_manifest_ignores_and_removes_runtime_bytecode(tmp_path: Path)
     bytecode = cache / "bridge.cpython-314.pyc"
     bytecode.write_bytes(b"before")
     ownership.record(root)
-    (root / ownership.MARKER).write_text("imprint-local:3.1.2\n", encoding="ascii")
+    (root / ownership.MARKER).write_text("imprint-local:3.2.0\n", encoding="ascii")
 
     entries = json.loads((root / ownership.MANIFEST).read_text(encoding="utf-8"))["entries"]
     assert not any("__pycache__" in entry["path"] for entry in entries)
@@ -225,33 +225,33 @@ def test_embedded_provenance_validates_revision_and_dist_hashes() -> None:
     provenance = {
         "format": 1,
         "product": "imprint-local",
-        "version": "3.1.2",
+        "version": "3.2.0",
         "source_revision": revision,
         "source_tree_sha256": "b" * 64,
         "python_distributions": [
             {
-                "fileName": "imprint_local-3.1.2-py3-none-any.whl",
+                "fileName": "imprint_local-3.2.0-py3-none-any.whl",
                 "sha256": hashlib.sha256(wheel).hexdigest(),
                 "size": len(wheel),
             },
             {
-                "fileName": "imprint_local-3.1.2.tar.gz",
+                "fileName": "imprint_local-3.2.0.tar.gz",
                 "sha256": hashlib.sha256(sdist).hexdigest(),
                 "size": len(sdist),
             },
         ],
     }
     files = {
-        "imprint-3.1.2/dist/imprint_local-3.1.2-py3-none-any.whl": wheel,
-        "imprint-3.1.2/dist/imprint_local-3.1.2.tar.gz": sdist,
-        "imprint-3.1.2/release/BUILD-PROVENANCE.json": json.dumps(provenance).encode(),
+        "imprint-3.2.0/dist/imprint_local-3.2.0-py3-none-any.whl": wheel,
+        "imprint-3.2.0/dist/imprint_local-3.2.0.tar.gz": sdist,
+        "imprint-3.2.0/release/BUILD-PROVENANCE.json": json.dumps(provenance).encode(),
     }
     verifier.validate_provenance(files, revision, "b" * 64)
     with pytest.raises(RuntimeError, match="expected revision"):
         verifier.validate_provenance(files, "c" * 40)
     with pytest.raises(RuntimeError, match="source digest"):
         verifier.validate_provenance(files, revision, "c" * 64)
-    files["imprint-3.1.2/dist/imprint_local-3.1.2-py3-none-any.whl"] = b"tampered"
+    files["imprint-3.2.0/dist/imprint_local-3.2.0-py3-none-any.whl"] = b"tampered"
     with pytest.raises(RuntimeError, match="digest mismatch"):
         verifier.validate_provenance(files, revision)
 
@@ -472,7 +472,7 @@ def test_release_provenance_covers_every_shipped_and_build_input() -> None:
 
 
 def _git_bound_release_files(verifier) -> dict[str, bytes]:
-    prefix = "imprint-3.1.2/"
+    prefix = "imprint-3.2.0/"
     files = {
         prefix + relative: verifier.git_blob(ROOT, "HEAD", relative)
         for relative in verifier.git_allowlist(ROOT, "HEAD")
@@ -482,7 +482,7 @@ def _git_bound_release_files(verifier) -> dict[str, bytes]:
         for relative in verifier.git_source_paths(ROOT, "HEAD")
     }
     wheel_output = io.BytesIO()
-    dist_info = "imprint_local-3.1.2.dist-info/"
+    dist_info = "imprint_local-3.2.0.dist-info/"
     with zipfile.ZipFile(wheel_output, "w") as wheel:
         def add(name: str, content: bytes | str) -> None:
             item = zipfile.ZipInfo(name)
@@ -492,19 +492,19 @@ def _git_bound_release_files(verifier) -> dict[str, bytes]:
         for name, content in sources.items():
             add(name, content)
         add(dist_info + "licenses/LICENSE", verifier.git_blob(ROOT, "HEAD", "LICENSE"))
-        add(dist_info + "METADATA", "Metadata-Version: 2.4\nName: imprint-local\nVersion: 3.1.2\nRequires-Python: <3.15,>=3.10\n")
+        add(dist_info + "METADATA", "Metadata-Version: 2.4\nName: imprint-local\nVersion: 3.2.0\nRequires-Python: <3.15,>=3.10\n")
         add(dist_info + "WHEEL", "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
         add(dist_info + "entry_points.txt", "[console_scripts]\nimprint = imprint.cli:main\n")
         add(dist_info + "top_level.txt", "imprint\n")
         add(dist_info + "RECORD", "")
-    files[prefix + "dist/imprint_local-3.1.2-py3-none-any.whl"] = wheel_output.getvalue()
+    files[prefix + "dist/imprint_local-3.2.0-py3-none-any.whl"] = wheel_output.getvalue()
 
     sdist_output = io.BytesIO()
-    sdist_prefix = "imprint_local-3.1.2/"
+    sdist_prefix = "imprint_local-3.2.0/"
     sdist_payload = {
         **{sdist_prefix + "src/" + name: content for name, content in sources.items()},
         **{sdist_prefix + name: verifier.git_blob(ROOT, "HEAD", name) for name in ("LICENSE", "README.md", "pyproject.toml")},
-        sdist_prefix + "PKG-INFO": b"Metadata-Version: 2.4\nName: imprint-local\nVersion: 3.1.2\nRequires-Python: <3.15,>=3.10\n",
+        sdist_prefix + "PKG-INFO": b"Metadata-Version: 2.4\nName: imprint-local\nVersion: 3.2.0\nRequires-Python: <3.15,>=3.10\n",
         sdist_prefix + "setup.cfg": b"[egg_info]\ntag_build = \ntag_date = 0\n\n",
     }
     for name in ("PKG-INFO", "SOURCES.txt", "dependency_links.txt", "entry_points.txt", "requires.txt", "top_level.txt"):
@@ -514,7 +514,7 @@ def _git_bound_release_files(verifier) -> dict[str, bytes]:
             item = tarfile.TarInfo(name)
             item.size = len(content)
             sdist.addfile(item, io.BytesIO(content))
-    files[prefix + "dist/imprint_local-3.1.2.tar.gz"] = sdist_output.getvalue()
+    files[prefix + "dist/imprint_local-3.2.0.tar.gz"] = sdist_output.getvalue()
     files[prefix + "release/BUILD-PROVENANCE.json"] = b"{}"
     files[prefix + "release/SBOM.spdx.json"] = b"{}"
     return files
@@ -529,7 +529,7 @@ def test_git_binding_accepts_exact_independent_source_payloads() -> None:
 def test_git_binding_rejects_mutated_public_hook_or_installer(relative: str) -> None:
     verifier = load("verify_git_bound_outer", "tools/release/verify_artifacts.py")
     files = _git_bound_release_files(verifier)
-    files["imprint-3.1.2/" + relative] += b"\nmalicious mutation\n"
+    files["imprint-3.2.0/" + relative] += b"\nmalicious mutation\n"
     with pytest.raises(RuntimeError, match="differs from Git blob"):
         verifier.validate_source_bindings(files, ROOT, "HEAD")
 
@@ -537,7 +537,7 @@ def test_git_binding_rejects_mutated_public_hook_or_installer(relative: str) -> 
 def test_git_binding_rejects_mutated_wheel_python_payload() -> None:
     verifier = load("verify_git_bound_wheel", "tools/release/verify_artifacts.py")
     files = _git_bound_release_files(verifier)
-    key = "imprint-3.1.2/dist/imprint_local-3.1.2-py3-none-any.whl"
+    key = "imprint-3.2.0/dist/imprint_local-3.2.0-py3-none-any.whl"
     output = io.BytesIO()
     with zipfile.ZipFile(io.BytesIO(files[key])) as source, zipfile.ZipFile(output, "w") as target:
         for item in source.infolist():
@@ -553,7 +553,7 @@ def test_git_binding_rejects_mutated_wheel_python_payload() -> None:
 def test_git_binding_rejects_mutated_sdist_python_payload() -> None:
     verifier = load("verify_git_bound_sdist", "tools/release/verify_artifacts.py")
     files = _git_bound_release_files(verifier)
-    key = "imprint-3.1.2/dist/imprint_local-3.1.2.tar.gz"
+    key = "imprint-3.2.0/dist/imprint_local-3.2.0.tar.gz"
     output = io.BytesIO()
     with tarfile.open(fileobj=io.BytesIO(files[key]), mode="r:gz") as source:
         records = []

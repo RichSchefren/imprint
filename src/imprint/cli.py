@@ -1254,10 +1254,14 @@ def main(argv: list[str] | None = None) -> int:
                 store.initialize()
                 source = str(event.get("source") or "").strip().lower()
                 context_was_reset = source in {"compact", "resume"}
+                jev_enabled = config.get("selector", {}).get("mode") == "jev"
+                if context_was_reset and jev_enabled:
+                    from .retrieve import reset_payload_delivery
+                    reset_payload_delivery(root=root, session_id=session)
                 result = retrieve_payload(
                     store, root=root, session_id=session, prompt="",
                     budget=int(config["context_budget_bytes"]),
-                    refresh=context_was_reset,
+                    refresh=context_was_reset and not jev_enabled,
                     selector_config=config.get("selector"),
                 )
                 response = {
@@ -1268,7 +1272,7 @@ def main(argv: list[str] | None = None) -> int:
                         "additionalContext": result.get("payload", ""),
                     },
                 }
-                if result.get("status") == "delivered" and not context_was_reset:
+                if result.get("status") == "delivered" and (not context_was_reset or jev_enabled):
                     _emit_retrieval_json(
                         response, root=root, session_id=session,
                         snapshot_id=str(result["snapshot_id"]), domain_id=None,
@@ -1288,7 +1292,8 @@ def main(argv: list[str] | None = None) -> int:
                     prompt=prompt,
                 )
                 domain = selection.domain_id
-                if domain is None:
+                jev_enabled = config.get("selector", {}).get("mode") == "jev"
+                if domain is None and not jev_enabled:
                     _write_json({
                         "hook_schema_version": "1.0.0", "status": "skipped",
                         "reason": selection.diagnostic_code,
@@ -1298,7 +1303,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = retrieve_payload(
                     store, root=root, session_id=session,
                     prompt=prompt, explicit_domain=domain,
-                    budget=int(config["context_budget_bytes"]), domain_only=True,
+                    budget=int(config["context_budget_bytes"]), domain_only=not jev_enabled,
                     selector_config=config.get("selector"),
                 )
                 response = {
@@ -1314,7 +1319,7 @@ def main(argv: list[str] | None = None) -> int:
                 if result.get("status") == "delivered":
                     _emit_retrieval_json(
                         response, root=root, session_id=session,
-                        snapshot_id=str(result["snapshot_id"]), domain_id=domain,
+                        snapshot_id=str(result["snapshot_id"]), domain_id=result.get("receipt_scope"),
                     )
                 else:
                     _write_json(response)

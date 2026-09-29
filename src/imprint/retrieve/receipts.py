@@ -82,6 +82,26 @@ class DeliveryReceipts:
         except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
             raise ValueError("prepared delivery receipt is corrupt") from exc
 
+    def reset_session(self, session_id: str) -> None:
+        """Forget delivery latches when the host explicitly resets its context."""
+        directory = self.root / self._safe(session_id, "session id")
+        for path in directory.glob("*.json"):
+            path.unlink(missing_ok=True)
+
+    def delivered_ids(self, session_id: str, snapshot_id: str) -> set[str]:
+        """Exclude records already committed into this session's current snapshot."""
+        session = self._safe(session_id, "session id")
+        snapshot = hashlib.sha256(snapshot_id.encode("utf-8")).hexdigest()[:24]
+        directory = self.root / session
+        seen: set[str] = set()
+        for path in directory.glob(f"{snapshot}-*.json"):
+            if path.name.endswith(".pending.json"):
+                continue
+            envelope = json.loads(path.read_text(encoding="utf-8"))
+            if envelope.get("receipt_schema_version") == "1.1.0":
+                seen.update(self._decode_prepared(path).get("selected_ids", []))
+        return seen
+
     def prepare_delivery(
         self, session_id: str, snapshot_id: str, domain_id: str | None,
         response: dict[str, object],
