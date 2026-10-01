@@ -38,7 +38,7 @@ if bash "${ARTIFACT_ROOT}/install/uninstall.sh" --install-root "${UNOWNED}" --co
 fi
 test "$(cat "${UNOWNED}/sentinel.txt")" = "must-survive"
 
-WHEEL="$(find "${ARTIFACT_ROOT}/dist" -type f -name 'imprint_local-3.1.2-*.whl' -print -quit)"
+WHEEL="$(find "${ARTIFACT_ROOT}/dist" -type f -name 'imprint_local-3.2.0-*.whl' -print -quit)"
 mv "${WHEEL}" "${WHEEL}.valid"
 printf '%s\n' 'not-a-wheel' > "${WHEEL}"
 if bash "${ARTIFACT_ROOT}/install/install.sh" --install-root "${INSTALL_ROOT}" --config "${CONFIG}" --settings "${SETTINGS}" --data-root "${DATA}" >/dev/null 2>&1; then
@@ -76,7 +76,7 @@ printf '%s\n' 'imprint-local:3.0.0' > "${INSTALL_ROOT}/.imprint-install-root"
 bash "${ARTIFACT_ROOT}/install/install.sh" --install-root "${INSTALL_ROOT}" --config "${CONFIG}" --settings "${SETTINGS}" --data-root "${DATA}"
 test ! -e "${INSTALL_ROOT}/legacy-owned.txt"
 bash "${ARTIFACT_ROOT}/install/install.sh" --install-root "${INSTALL_ROOT}" --config "${CONFIG}" --settings "${SETTINGS}" --data-root "${DATA}"
-test "$("${SHELL}" -lc 'imprint version')" = "3.1.2"
+test "$("${SHELL}" -lc 'imprint version')" = "3.2.0"
 "${SHELL}" -lc 'imprint --help >/dev/null'
 "${INSTALL_ROOT}/venv/bin/python" "${ARTIFACT_ROOT}/tests/acceptance/artifact_lifecycle.py" --data-root "${DATA}" --config "${CONFIG}"
 health_rc=0

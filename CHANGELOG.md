@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.2.0 — 2026-09-20
+
+- Add an optional, fail-open Jev relevance selector; deterministic offline retrieval remains the default.
+- Apply domain, authority, provenance and partition eligibility before sending candidates to Jev. Preserve audit provenance and accurate selection metadata for full-size selections.
+- Select unseen records on prompt hooks, including prompts without a matching domain, and reset delivery tracking after host context resets.
+- Rebuild offline installers for 3.2.0 and preserve supported 3.1.1/3.1.2 upgrade ownership.
+
 ## 3.1.2 — 2026-08-10
 
 - Fix the Windows installer writing `config.json` with a UTF-8 BOM under Windows

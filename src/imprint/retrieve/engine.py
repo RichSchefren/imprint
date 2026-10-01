@@ -201,6 +201,19 @@ class RetrievalEngine:
             raise ValueError(f"unsupported ontology partitions: {sorted(unknown)}")
         return partitions
 
+    def eligible_candidates(self, snapshot_id, selected_domain=None, ontology_partitions=None,
+                            authority_mode=None) -> tuple[RetrievalRecord, ...]:
+        """Apply the same disclosure boundary before local or remote ranking."""
+        mode = authority_mode or self.config.authority_mode
+        if mode not in {"authoritative", "analytical"}:
+            raise ValueError("unsupported retrieval authority mode")
+        partitions = self._partitions(ontology_partitions, mode)
+        return tuple(
+            item for item in self.source.retrieval_candidates(snapshot_id)
+            if eligible(item, selected_domain, mode)
+            and (not partitions or item.ontology_partition in partitions)
+        )
+
     def retrieve(
         self,
         *,
@@ -214,11 +227,7 @@ class RetrievalEngine:
         if mode not in {"authoritative", "analytical"}:
             raise ValueError("unsupported retrieval authority mode")
         partitions = self._partitions(ontology_partitions, mode)
-        candidates = [
-            item for item in self.source.retrieval_candidates(snapshot_id)
-            if eligible(item, selected_domain, mode)
-            and (not partitions or item.ontology_partition in partitions)
-        ]
+        candidates = list(self.eligible_candidates(snapshot_id, selected_domain, partitions, mode))
         candidates.sort(
             key=lambda item: _rank_key(
                 item, query, selected_domain, self.config.tokenizer_version

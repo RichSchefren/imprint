@@ -34,7 +34,7 @@ else:
         VERSION = distribution_version("imprint-local")
     except PackageNotFoundError:
         raise RuntimeError("Imprint version metadata is unavailable")
-SUPPORTED_VERSIONS = ("3.0.0", "3.0.1", "3.1.0", VERSION)
+SUPPORTED_VERSIONS = ("3.0.0", "3.0.1", "3.1.0", "3.1.1", "3.1.2", VERSION)
 
 
 def _digest(path: Path) -> str:

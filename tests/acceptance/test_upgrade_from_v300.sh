@@ -62,7 +62,7 @@ printf '%s\n' preserved > "${DATA}/default/v300-data-sentinel.txt"
 bash "${ROOT}/install/install.sh" \
   --install-root "${INSTALL_ROOT}" --config "${CONFIG}" \
   --settings "${SETTINGS}" --data-root "${DATA}"
-test "$(IMPRINT_CONFIG="${CONFIG}" "${INSTALL_ROOT}/venv/bin/imprint" version)" = "3.1.2"
+test "$(IMPRINT_CONFIG="${CONFIG}" "${INSTALL_ROOT}/venv/bin/imprint" version)" = "3.2.0"
 test "$(cat "${DATA}/default/v300-data-sentinel.txt")" = preserved
 test -z "$(find "$(dirname "${INSTALL_ROOT}")" -maxdepth 1 -name 'app.imprint-backup.*' -print -quit)"
 
@@ -70,4 +70,4 @@ bash "${ROOT}/install/uninstall.sh" \
   --install-root "${INSTALL_ROOT}" --config "${CONFIG}" --settings "${SETTINGS}"
 test ! -e "${INSTALL_ROOT}"
 test -f "${DATA}/default/v300-data-sentinel.txt"
-echo "real v3.0.0 to v3.1.2 upgrade: PASS"
+echo "real v3.0.0 to v3.2.0 upgrade: PASS"

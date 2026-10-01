@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Sequence
 
-from .engine import RetrievalEngine
+from .engine import RetrievalEngine, _render
 from .models import (
     BUSINESS_DECLARED_PARTITION,
     BUSINESS_OBSERVED_PARTITION,
@@ -20,6 +22,7 @@ from .models import (
 )
 from .receipts import DeliveryReceipts
 from .store_source import StoreRetrievalSource
+from .jev import JevSelector
 
 
 def _snapshot_id(store) -> str:
@@ -29,21 +32,72 @@ def _snapshot_id(store) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _jev_result(candidates, prompt: str, result, jev: dict, output_format: str):
+    """Replace the deterministic result with Jev's picks, or return it unchanged."""
+    picks = JevSelector(
+        endpoint=jev.get("endpoint", "https://openrouter.ai/api/alpha/decisions"),
+        model=jev.get("model", "typesafe/jev-1.13"),
+        api_key_env=jev.get("api_key_env", "OPENROUTER_API_KEY"),
+    ).select(
+        prompt,
+        candidates,
+        top=jev.get("top", 20),
+        floor=jev.get("score_floor", 0.55),
+        timeout=jev.get("timeout_seconds", 3),
+        prefilter_keep=jev.get("prefilter_keep", 150),
+    )
+    if not picks:
+        return result
+    rendered = []
+    section_bytes = {"core": 0, "general": 0, "domain": 0}
+    selected_by_partition = {}
+    for rank, (item, score) in enumerate(picks, 1):
+        line = _render(item, output_format)
+        if output_format == "audit":
+            value = json.loads(line)
+            value["selector"] = {"mode": "jev", "score": score, "rank": rank}
+            line = (json.dumps(value, ensure_ascii=False, sort_keys=True,
+                               separators=(",", ":")) + "\n").encode("utf-8")
+        else:
+            label, text = line.decode("utf-8").split(": ", 1)
+            line = f"{label[:-1]}; Jev score={score:.3f}, rank={rank}): {text}".encode("utf-8")
+        rendered.append(line)
+        section_bytes[item.section] += len(line)
+        selected_by_partition.setdefault(item.ontology_partition, []).append(item.record_id)
+    payload = b"".join(rendered)
+    return replace(
+        result,
+        payload=payload,
+        selected_ids=tuple(item.record_id for item, _ in picks),
+        omitted_count=max(0, result.eligible_count - len(picks)),
+        selected_bytes=len(payload),
+        budget_bytes=max(result.budget_bytes, len(payload)),
+        section_bytes=section_bytes,
+        selected_by_partition={key: tuple(ids) for key, ids in selected_by_partition.items()},
+    )
+
+
 def retrieve_payload(store, *, root: Path, session_id: str, prompt: str = "", explicit_domain: str | None = None,
                      budget: int = 32 * 1024, refresh: bool = False,
                      domain_only: bool = False,
                      output_format: str = "compact",
                      authority_mode: AuthorityMode = "authoritative",
-                     ontology_partitions: Sequence[str] | None = None) -> dict[str, object]:
+                     ontology_partitions: Sequence[str] | None = None,
+                     selector_config: dict | None = None) -> dict[str, object]:
     """Build one bounded payload per session/snapshot with an atomic receipt."""
     snapshot_id = _snapshot_id(store)
     safe_session = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:24]
     receipts = DeliveryReceipts(Path(root) / "receipts")
     source = StoreRetrievalSource(store)
-    if domain_only:
+    jev_active = bool(selector_config and selector_config.get("mode") == "jev" and prompt)
+    delivered_ids = receipts.delivered_ids(safe_session, snapshot_id) if jev_active and not refresh else set()
+    if domain_only or delivered_ids:
         class DomainOnlySource:
             def retrieval_candidates(self, requested_snapshot_id):
-                return tuple(item for item in source.retrieval_candidates(requested_snapshot_id) if item.section == "domain")
+                return tuple(
+                    item for item in source.retrieval_candidates(requested_snapshot_id)
+                    if (not domain_only or item.section == "domain") and item.record_id not in delivered_ids
+                )
         retrieval_source = DomainOnlySource()
     else:
         retrieval_source = source
@@ -63,6 +117,10 @@ def retrieve_payload(store, *, root: Path, session_id: str, prompt: str = "", ex
     if authority_mode != "authoritative" or ontology_partitions is not None:
         contract = "\0".join((authority_mode, *(ontology_partitions or ())))
         receipt_domain = "query-" + hashlib.sha256(contract.encode("utf-8")).hexdigest()[:16]
+    if jev_active and not refresh:
+        contract = json.dumps([prompt, explicit_domain, domain_only, authority_mode,
+                               list(ontology_partitions or ()), output_format], ensure_ascii=False)
+        receipt_domain = "jev-" + hashlib.sha256(contract.encode("utf-8")).hexdigest()[:24]
     if not refresh:
         pending, delivered = receipts._paths(safe_session, snapshot_id, receipt_domain)
         if delivered.exists():
@@ -74,6 +132,13 @@ def retrieve_payload(store, *, root: Path, session_id: str, prompt: str = "", ex
         snapshot_id=snapshot_id, query=prompt, selected_domain=explicit_domain,
         ontology_partitions=ontology_partitions, authority_mode=authority_mode,
     )
+    # Jev is strictly opt-in and fail-open. The deterministic result above is
+    # retained for every missing-key, network, parse, or timeout failure.
+    if jev_active:
+        candidates = engine.eligible_candidates(
+            snapshot_id, explicit_domain, ontology_partitions, authority_mode,
+        )
+        result = _jev_result(candidates, prompt, result, selector_config.get("jev", {}), output_format)
     response: dict[str, object] = {
         "status": "delivered",
         "snapshot_id": snapshot_id,
@@ -101,6 +166,11 @@ def retrieve_payload(store, *, root: Path, session_id: str, prompt: str = "", ex
         return {"status": "already_delivered", "snapshot_id": snapshot_id, "payload": "", "selected_ids": []}
     assert cached is not None
     return cached
+
+
+def reset_payload_delivery(*, root: Path, session_id: str) -> None:
+    safe_session = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:24]
+    DeliveryReceipts(Path(root) / "receipts").reset_session(safe_session)
 
 
 def commit_payload_delivery(

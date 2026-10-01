@@ -65,7 +65,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 Both installers create an isolated virtual environment, write a portable config,
 install an owned `imprint` launcher in the user's command path, register each
 managed hook exactly once, and fail if the installed CLI cannot report version
-`3.1.2`. Re-running the installer is safe and removes duplicate managed hooks
+`3.2.0`. Re-running the installer is safe and removes duplicate managed hooks
 while preserving unrelated hooks. On POSIX, the installer adds one marked PATH
 block to the active shell's login profile (`.zprofile`, `.bash_profile`, or
 `.profile`); uninstall removes that exact owned block and leaves unrelated shell
@@ -327,3 +327,13 @@ Artifact acceptance runs from extracted archives, not the checkout. CI includes
 
 Imprint is available under the [MIT License](LICENSE). Never attach a live bank,
 database, spool, export, or config to a public issue. See [SECURITY.md](SECURITY.md).
+
+## Optional Jev selector
+
+Core operation stays offline by default. The optional Jev selector is opt-in
+with `selector.mode: "jev"`. When enabled, the current turn and the principle
+text of prefiltered candidate entries are sent to the configured Jev endpoint.
+No store contents beyond those candidate texts are sent, and no session IDs are
+sent. A missing key, timeout, or endpoint failure uses the normal deterministic
+retrieval instead. Jev selections include their score, rank, and the entry's
+provenance.
