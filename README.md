@@ -5,6 +5,13 @@ express while working with Claude Code. It stores the raw **Case**, **Verdict**,
 **Call**, optional **Reason**, and available chosen/rejected alternatives before
 any principle is derived. Later projections never replace that source evidence.
 
+## Why this exists
+
+AI can remember information about a person without knowing how that person would
+rule when a new decision appears. Imprint preserves the cases, verdicts, and
+reasons needed to make that distinction traceable. This project is part of Rich
+Schefren's [Imprinted AI](https://aistrategist.com/imprinted-ai) work.
+
 The Imprint 3.1 line is the authority, ontology, resilience, and
 public-operability release built on the clean 3.0.0 architectural reset and
 3.0.1 integrity closure. The v3 line is not data-compatible by accident: imports are
