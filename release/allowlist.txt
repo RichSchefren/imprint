@@ -39,7 +39,7 @@ release/wheelhouse/linux/cryptography-48.0.1-cp311-abi3-manylinux2014_aarch64.ma
 release/wheelhouse/linux/cryptography-48.0.1-cp311-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
 release/wheelhouse/linux/cryptography-48.0.1-cp39-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl
 release/wheelhouse/linux/cryptography-48.0.1-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
-release/wheelhouse/linux/imprint_local-3.1.2-py3-none-any.whl
+release/wheelhouse/linux/imprint_local-3.2.0-py3-none-any.whl
 release/wheelhouse/linux/pycparser-3.0-py3-none-any.whl
 release/wheelhouse/linux/rfc8785-0.1.4-py3-none-any.whl
 release/wheelhouse/linux/typing_extensions-4.16.0-py3-none-any.whl
@@ -55,7 +55,7 @@ release/wheelhouse/macos/cffi-2.0.0-cp314-cp314-macosx_10_13_x86_64.whl
 release/wheelhouse/macos/cffi-2.0.0-cp314-cp314-macosx_11_0_arm64.whl
 release/wheelhouse/macos/cryptography-48.0.1-cp311-abi3-macosx_10_9_universal2.whl
 release/wheelhouse/macos/cryptography-48.0.1-cp39-abi3-macosx_10_9_universal2.whl
-release/wheelhouse/macos/imprint_local-3.1.2-py3-none-any.whl
+release/wheelhouse/macos/imprint_local-3.2.0-py3-none-any.whl
 release/wheelhouse/macos/pycparser-3.0-py3-none-any.whl
 release/wheelhouse/macos/rfc8785-0.1.4-py3-none-any.whl
 release/wheelhouse/macos/typing_extensions-4.16.0-py3-none-any.whl
@@ -68,7 +68,7 @@ release/wheelhouse/windows/cffi-2.0.0-cp313-cp313-win_amd64.whl
 release/wheelhouse/windows/cffi-2.0.0-cp314-cp314-win_amd64.whl
 release/wheelhouse/windows/cryptography-48.0.1-cp311-abi3-win_amd64.whl
 release/wheelhouse/windows/cryptography-48.0.1-cp39-abi3-win_amd64.whl
-release/wheelhouse/windows/imprint_local-3.1.2-py3-none-any.whl
+release/wheelhouse/windows/imprint_local-3.2.0-py3-none-any.whl
 release/wheelhouse/windows/pycparser-3.0-py3-none-any.whl
 release/wheelhouse/windows/rfc8785-0.1.4-py3-none-any.whl
 release/wheelhouse/windows/typing_extensions-4.16.0-py3-none-any.whl

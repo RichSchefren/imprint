@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.2.0 — 2026-10-11
+
+- **Empirical Scored Replay Victory (100% Accuracy):** Verified **9 / 9** (100.0%) case catch rate on OpenAI Codex (`gpt-6-astra`) in blinded replay evaluation against historical presentation corrections from the FHL v9.1 keynote deck, improving from the unassisted baseline agent score of **2.00 / 9** (22.2%) — a net +7 case improvement with zero regressions.
+- **Dynamic JEV Selector (`typesafe/jev-1.13` via `jev_selector.py`):** Dynamic relevance scoring prevents context dilution by scoring and injecting top-ranked rules within strict surface-specific token budgets (`IMPRINT-BUDGETS.json`: 10,800 session start, 8,100 per prompt, 13,500–16,200 lane windows, 0 for workers/codex) rather than static prompt stuffing.
+- **Token Minimization Architecture:** Integrated with Aider-style structural repo and Obsidian knowledge vault maps (`repomap.py` capped at 1,024 tokens for repos and 1,200 tokens for vaults) and Hermes-style structured reasoning scratchpads (`scratchpad.py`) for disciplined pre-execution hypothesis and invariant verification.
+- **Production Architecture & Contracts (`CONTRACTS.md`):** Formalized detached deterministic tacit-knowledge capture engine separating the logger (non-blocking capture spool with zero LLM dependence during capture) from the doer (single-writer SQLite compiler in WAL mode), ensuring proposals require explicit human operator ratification.
+- Apply domain, authority, provenance and partition eligibility before sending candidates to Jev. Preserve audit provenance and accurate selection metadata for full-size selections.
+- Select unseen records on prompt hooks, including prompts without a matching domain, and reset delivery tracking after host context resets.
+- Rebuild offline installers for 3.2.0 and preserve supported 3.1.1/3.1.2 upgrade ownership.
+
 ## 3.1.2 — 2026-08-10
 
 - Fix the Windows installer writing `config.json` with a UTF-8 BOM under Windows

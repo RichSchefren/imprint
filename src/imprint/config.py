@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -13,6 +14,19 @@ from .paths import default_data_root, operator_root, validate_data_root
 
 CURRENT_CONFIG_VERSION = "3.1.1"
 SUPPORTED_CONFIG_VERSIONS = frozenset({"3.0.0", CURRENT_CONFIG_VERSION})
+
+DEFAULT_SELECTOR = {
+    "mode": "deterministic",
+    "jev": {
+        "endpoint": "https://openrouter.ai/api/alpha/decisions",
+        "model": "typesafe/jev-1.13",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "top": 20,
+        "score_floor": 0.55,
+        "timeout_seconds": 3,
+        "prefilter_keep": 150,
+    },
+}
 
 DEFAULTS = {
     "config_version": CURRENT_CONFIG_VERSION,
@@ -26,6 +40,7 @@ DEFAULTS = {
     # cannot control, so the shipped Windows deadline is deliberately wider.
     "hook_timeout_seconds": 60 if os.name == "nt" else 10,
     "domains": [],
+    "selector": DEFAULT_SELECTOR,
 }
 MINIMUM_HOOK_TIMEOUT_SECONDS = 1
 MAXIMUM_HOOK_TIMEOUT_SECONDS = 300
@@ -68,6 +83,36 @@ def _validate_config(data: dict[str, Any]) -> None:
         )
     if not isinstance(data.get("domains"), list):
         raise ValidationError("domains must be an array")
+    selector = data.get("selector")
+    if (
+        not isinstance(selector, dict)
+        or set(selector) - {"mode", "jev"}
+        or selector.get("mode") not in {"deterministic", "jev"}
+    ):
+        raise ValidationError("selector mode must be deterministic or jev")
+    jev = selector.get("jev", {})
+    if not isinstance(jev, dict) or set(jev) - set(DEFAULT_SELECTOR["jev"]):
+        raise ValidationError("selector jev contains unknown fields")
+    merged = {**DEFAULT_SELECTOR["jev"], **jev}
+    for field in ("endpoint", "model", "api_key_env"):
+        if not isinstance(merged[field], str) or not merged[field].strip():
+            raise ValidationError(f"selector jev {field} must be a non-empty string")
+    if not _is_int(merged["top"]) or not 1 <= merged["top"] <= 150:
+        raise ValidationError("selector jev top must be 1..150")
+    if (
+        isinstance(merged["score_floor"], bool)
+        or not isinstance(merged["score_floor"], (int, float))
+        or not 0 <= merged["score_floor"] <= 1
+    ):
+        raise ValidationError("selector jev score_floor must be 0..1")
+    if (
+        isinstance(merged["timeout_seconds"], bool)
+        or not isinstance(merged["timeout_seconds"], (int, float))
+        or not 0 < merged["timeout_seconds"] <= 30
+    ):
+        raise ValidationError("selector jev timeout_seconds must be above 0 and at most 30")
+    if not _is_int(merged["prefilter_keep"]) or not 1 <= merged["prefilter_keep"] <= 10000:
+        raise ValidationError("selector jev prefilter_keep must be 1..10000")
     domain_fields = {"domain_id", "public_label", "safe_paths", "keywords", "frozen"}
     for domain in data["domains"]:
         if not isinstance(domain, dict) or not {"domain_id", "public_label"}.issubset(domain):
@@ -105,7 +150,7 @@ def config_path() -> Path:
 
 def load_config(path: Path | None = None) -> dict[str, Any]:
     target = path or config_path()
-    data = dict(DEFAULTS)
+    data = copy.deepcopy(DEFAULTS)
     if target.exists():
         try:
             # utf-8-sig tolerates a leading BOM. Windows tools (notably Windows

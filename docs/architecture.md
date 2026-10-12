@@ -69,3 +69,42 @@ Both nodes and edges preserve evidence, provenance, authority, valid/system
 time, and typed endpoint signatures. The JSON-LD graph includes payload and
 evidence directly in addition to the lossless ledger, so another implementation
 does not need Imprint-specific reconstruction merely to understand the graph.
+
+## Dynamic Selection and Token Budgets
+
+To prevent **context dilution** and the failure modes associated with static prompt stuffing,
+Imprint integrates an optional dynamic relevance selector powered by JEV (`typesafe/jev-1.13`
+via `jev_selector.py`):
+
+1. **Eligibility Pre-filtering:** Local retrieval filters the store for candidate records matching
+   current domain, authority status, provenance completeness, and ontology partition criteria.
+2. **Sub-Second Relevance Scoring:** Candidates and current turn text are dispatched to the JEV endpoint,
+   which scores semantic relevance against the operator's active task.
+3. **Budget Enforcement:** Selections are packed greedily into surface-specific token budgets defined
+   in `IMPRINT-BUDGETS.json` (e.g., 10,800 tokens for session start, 8,100 tokens for per-prompt turns,
+   13,500–16,200 tokens for lane lead turns; worker and codex execution contexts receive 0 tokens).
+4. **Fail-Open Resilience:** Timeouts (>4.5s), network drops, or missing credentials automatically
+   fall back to local deterministic retrieval without interrupting host execution.
+
+## Token Minimization Ecosystem
+
+Imprint operates alongside two complementary token-minimization components:
+
+- **Aider-Style Structural Mapping (`repomap.py`):** Uses AST extraction and PageRank to generate
+  compact structural skeletons of code repositories (capped at 1,024 tokens) and Obsidian knowledge
+  vaults (capped at 1,200 tokens), providing high-level orientation without consuming model attention.
+- **Hermes-Style Structured Reasoning Scratchpads (`scratchpad.py`):** Enforces disciplined "Think
+  Before Tool" chain-of-thought inside `<scratchpad>...</scratchpad>` blocks for Codex and Claude Sonnet,
+  ensuring agents verify ground truth and assert invariants before executing mutations.
+
+## Separation of Logger and Doer (`CONTRACTS.md`)
+
+Production operation strictly separates the observation and capture lifecycle from canonical mutation:
+
+- **The Logger (Capture Spool):** Operates without model invocation or database write locks. The
+  Stop hook records raw Case, Verdict, Call, Reason, and alternatives to an immutable, per-node spool.
+- **The Doer (Single-Writer SQLite Compiler):** Only the designated compiler node validates envelopes
+  and mutates the canonical SQLite database in WAL mode.
+- **Explicit Ratification:** Extracted or inferred patterns remain inert proposals until explicit
+  human operator action ratifies them into typed, authoritative nodes with complete provenance.
+

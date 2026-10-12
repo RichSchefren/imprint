@@ -51,7 +51,7 @@ jobs:
       - name: Rebuild exact offline wheelhouse from canonical distribution
         run: |
           python tools/release/build_wheelhouse.py \
-            --imprint-wheel "$(find dist -maxdepth 1 -type f -name 'imprint_local-3.1.2-*.whl' -print -quit)"
+            --imprint-wheel "$(find dist -maxdepth 1 -type f -name 'imprint_local-3.2.0-*.whl' -print -quit)"
       - name: Prove committed wheelhouse is canonical
         run: git diff --exit-code -- release/wheelhouse requirements/runtime-*.lock
       - name: Verify Linux wheelhouse before packaging
@@ -89,10 +89,10 @@ jobs:
           path: candidate
       - run: python tools/release/verify_artifacts.py candidate --expected-revision "$(git rev-parse HEAD)" --source-root .
       - name: Extract tar artifact
-        run: python tools/release/extract_safe.py candidate/imprint-3.1.2.tar.gz extracted
+        run: python tools/release/extract_safe.py candidate/imprint-3.2.0.tar.gz extracted
       - name: Verify exact platform wheelhouse
         run: |
-          artifact="${GITHUB_WORKSPACE}/extracted/imprint-3.1.2"
+          artifact="${GITHUB_WORKSPACE}/extracted/imprint-3.2.0"
           lane=linux
           if [ "${RUNNER_OS}" = "macOS" ]; then lane=macos; fi
           python "${artifact}/tools/install/verify_wheelhouse.py" \
@@ -100,17 +100,17 @@ jobs:
             --lane "${lane}" \
             --manifest-sha256 "$(tr -d '\r\n' < "${artifact}/release/wheelhouse/manifest.sha256")"
       - name: Empty-HOME artifact acceptance
-        run: bash extracted/imprint-3.1.2/tests/acceptance/test_install_posix.sh
+        run: bash extracted/imprint-3.2.0/tests/acceptance/test_install_posix.sh
       - name: Prepare exact artifact for native authority acceptance
         run: |
-          artifact="${GITHUB_WORKSPACE}/extracted/imprint-3.1.2"
+          artifact="${GITHUB_WORKSPACE}/extracted/imprint-3.2.0"
           lane=linux
           if [ "${RUNNER_OS}" = "macOS" ]; then lane=macos; fi
           python -m venv "${artifact}/.venv"
           "${artifact}/.venv/bin/python" -m pip install \
             --disable-pip-version-check --no-index \
             --find-links "${artifact}/release/wheelhouse/${lane}" \
-            imprint-local==3.1.2
+            imprint-local==3.2.0
           python -m pip install 'pexpect==4.9.0'
       - name: Native ${{ matrix.os }} authority acceptance
         env:
@@ -124,7 +124,7 @@ jobs:
           import pexpect
 
           command = os.path.join(
-              os.environ["GITHUB_WORKSPACE"], "extracted", "imprint-3.1.2",
+              os.environ["GITHUB_WORKSPACE"], "extracted", "imprint-3.2.0",
               "tests", "acceptance", os.environ["AUTHORITY_SCRIPT"],
           )
           child = pexpect.spawn("bash", [command], encoding="utf-8", timeout=900)
@@ -177,7 +177,7 @@ jobs:
           path: candidate
       - name: Extract ZIP artifact
         shell: powershell
-        run: python tools/release/extract_safe.py candidate/imprint-3.1.2.zip extracted
+        run: python tools/release/extract_safe.py candidate/imprint-3.2.0.zip extracted
       - name: Install and harden with no PowerShell 7 resolvable
         shell: powershell
         run: |
@@ -188,7 +188,7 @@ jobs:
           }
           if (Get-Command pwsh.exe -ErrorAction SilentlyContinue) { throw 'PowerShell 7 is still resolvable.' }
           if ($PSVersionTable.PSVersion.Major -ne 5) { throw "Expected Windows PowerShell 5.1, got $($PSVersionTable.PSVersion)." }
-          ./extracted/imprint-3.1.2/tests/acceptance/test_install_windows.ps1
+          ./extracted/imprint-3.2.0/tests/acceptance/test_install_windows.ps1
 
   artifact-windows:
     needs: build
@@ -206,27 +206,27 @@ jobs:
         run: python tools/release/verify_artifacts.py candidate --expected-revision "$(git rev-parse HEAD)" --source-root .
       - name: Extract ZIP artifact
         shell: pwsh
-        run: python tools/release/extract_safe.py candidate/imprint-3.1.2.zip extracted
+        run: python tools/release/extract_safe.py candidate/imprint-3.2.0.zip extracted
       - name: Verify exact Windows wheelhouse
         shell: pwsh
         run: |
-          $Artifact = Join-Path $env:GITHUB_WORKSPACE 'extracted/imprint-3.1.2'
+          $Artifact = Join-Path $env:GITHUB_WORKSPACE 'extracted/imprint-3.2.0'
           $Digest = (Get-Content -Raw (Join-Path $Artifact 'release/wheelhouse/manifest.sha256')).Trim()
           python (Join-Path $Artifact 'tools/install/verify_wheelhouse.py') `
             --root $Artifact --lane windows --manifest-sha256 $Digest
           if ($LASTEXITCODE -ne 0) { throw 'Exact Windows wheelhouse verification failed.' }
       - name: Genuine Windows empty-profile acceptance
         shell: pwsh
-        run: ./extracted/imprint-3.1.2/tests/acceptance/test_install_windows.ps1
+        run: ./extracted/imprint-3.2.0/tests/acceptance/test_install_windows.ps1
       - name: Prepare exact artifact for native Windows authority acceptance
         shell: pwsh
         run: |
-          $Artifact = Join-Path $env:GITHUB_WORKSPACE 'extracted/imprint-3.1.2'
+          $Artifact = Join-Path $env:GITHUB_WORKSPACE 'extracted/imprint-3.2.0'
           python -m venv (Join-Path $Artifact '.venv')
           & (Join-Path $Artifact '.venv/Scripts/python.exe') -m pip install `
             --disable-pip-version-check --no-index `
             --find-links (Join-Path $Artifact 'release/wheelhouse/windows') `
-            'imprint-local==3.1.2'
+            'imprint-local==3.2.0'
           if ($LASTEXITCODE -ne 0) { throw 'Exact-artifact Windows wheelhouse install failed.' }
           & (Join-Path $Artifact '.venv/Scripts/python.exe') -m pip install 'pywinpty==3.0.5'
           if ($LASTEXITCODE -ne 0) { throw 'Standard-user ConPTY driver install failed.' }
@@ -235,7 +235,7 @@ jobs:
           IMPRINT_EXTERNAL_PTY: '1'
         shell: pwsh
         run: |
-          $Artifact = Join-Path $env:GITHUB_WORKSPACE 'extracted/imprint-3.1.2'
+          $Artifact = Join-Path $env:GITHUB_WORKSPACE 'extracted/imprint-3.2.0'
           $User = 'imprintci' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
           $Password = 'Aa1!' + [Guid]::NewGuid().ToString('N')
           Write-Output "::add-mask::$Password"

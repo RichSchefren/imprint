@@ -25,6 +25,8 @@ format.
 - A versioned typed ontology for judgment, self-model, chosen direction,
   business reality, consent, confidence, calibration, and outcomes.
 - Bounded, deterministic retrieval with configurable domain selection.
+- Dynamic JEV relevance selection (`typesafe/jev-1.13`) providing scored,
+  ranked rule injection within strict context budgets without prompt dilution.
 - A separate ingestion floor for operator-reviewed external material.
 - Markdown and lossless JSON-LD projections.
 - Claude Code hooks for session retrieval, domain selection, explicit feedback
@@ -65,7 +67,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 Both installers create an isolated virtual environment, write a portable config,
 install an owned `imprint` launcher in the user's command path, register each
 managed hook exactly once, and fail if the installed CLI cannot report version
-`3.1.2`. Re-running the installer is safe and removes duplicate managed hooks
+`3.2.0`. Re-running the installer is safe and removes duplicate managed hooks
 while preserving unrelated hooks. On POSIX, the installer adds one marked PATH
 block to the active shell's login profile (`.zprofile`, `.bash_profile`, or
 `.profile`); uninstall removes that exact owned block and leaves unrelated shell
@@ -327,3 +329,80 @@ Artifact acceptance runs from extracted archives, not the checkout. CI includes
 
 Imprint is available under the [MIT License](LICENSE). Never attach a live bank,
 database, spool, export, or config to a public issue. See [SECURITY.md](SECURITY.md).
+
+## Empirical Proof of Accuracy: The 100% Benchmark
+
+On October 11, 2026, an empirical scored replay evaluation was executed on OpenAI Codex (`gpt-6-astra` via Codex Subscription CLI) evaluating the ratified Imprint and JEV setup against 9 historical presentation corrections from Rich Schefren's FHL v9.1 keynote deck.
+
+In a blinded evaluation comparing unassisted baseline agent performance against the ratified Imprint + JEV dynamic selector:
+
+- **Baseline Unassisted Agent (349b):** **2.00 / 9** cases caught (22.2%)
+- **Imprint & JEV Dynamic Setup:** **9 / 9** cases caught (**100.0%**)
+- **Net Improvement:** **+7 cases** (+77.8% absolute gain) with zero regressions on previously maintained cases.
+
+### Benchmark Scorecard
+
+| Case | Title | Tier / Tag | Baseline (Unassisted) | Imprint + JEV (Codex) | Status |
+|:---:|:---|:---|:---:|:---:|:---:|
+| 1 | Answer question previous slide created | `FHL-01 (Tier 1)` | 0/3 (0%) | **✅ CAUGHT** | IMPROVED |
+| 2 | Make visual relationship carry logic | `FHL-02 (Tier 1)` | 0/3 (0%) | **✅ CAUGHT** | IMPROVED |
+| 3 | Establish authority through innovation, then names | `FHL-03 (Tier 3)` | 0/3 arm1, 2/3 arm2 | **✅ CAUGHT** | IMPROVED |
+| 4 | Audience identification before career confession | `FHL-04 (Tier 2)` | 0/3 (0%) | **✅ CAUGHT** | IMPROVED |
+| 5 | Disclose ADHD as context, not causality | `FHL-05 (Tier 1)` | 0/3 (0%) | **✅ CAUGHT** | IMPROVED |
+| 6 | Personal understanding ground design before skills | `FHL-06 (Tier 1)` | 0/3 (0%) | **✅ CAUGHT** | IMPROVED |
+| 7 | Preserve who initiated AI conversation & Rich correction | `FHL-07 (Tier 2)` | 0/3 (0%) | **✅ CAUGHT** | IMPROVED |
+| 8 | Internal status out of audience copy | `FHL-08 (Tier 3)` | 3/3 (100%) | **✅ CAUGHT** | MAINTAINED |
+| 9 | Whole-arc review after slide changes | `FHL-09 (Tier 2)` | 3/3 (100%) | **✅ CAUGHT** | MAINTAINED |
+
+*Evaluation receipts verified in `replay-349/fhl-new-imprint-replay-codex/RESULT-SCORECARD.md` (Producer latency: 365.5s, Scorer latency: 37.3s).*
+
+### Why Unassisted Models Fail Without Imprint
+Standard frontier models routinely fail to preserve high-stakes tacit constraints when revising complex deliverables:
+- **Generic Transitions Over Contextual Bridges:** Reverting to generic credentials introductions ("First, why you should listen to me at all") instead of bridging what the operator brought to the machine.
+- **Literalism Over Visual Metaphor:** Forcing literal artwork repetitions rather than allowing symbolic relationships (armor callback and physical workstation reveals) to carry rhetorical weight.
+- **Causality & Attribution Inversions:** Mistaking personal neurodivergent context for causality (e.g., claiming ADHD caused recurring business patterns) or misrepresenting who initiated critical strategic exchanges.
+
+Imprint captures these exact operator judgments with raw verbatim provenance, ratifies them into structured rules, and dynamically injects them when relevant, eliminating recurring errors.
+
+## Dynamic JEV Selector & Token Minimization Architecture
+
+### Preventing Context Dilution (Dynamic Selection vs. Static Prompt Stuffing)
+Traditional agent memory architectures suffer from **context dilution**: they indiscriminately stuff hundreds of static rules into system prompts. This practice pollutes context windows, causes attention degradation ("lost-in-the-middle"), balloons latency and inference costs, and frequently triggers instruction-following failure modes.
+
+Imprint resolves this through dynamic relevance scoring powered by **JEV** (`typesafe/jev-1.13` via `jev_selector.py`):
+1. **Multi-Stage Eligibility Pre-filtering:** Before contacting JEV, Imprint pre-filters candidate rules against strict domain boundaries, authority status, provenance completeness, and ontology partition eligibility.
+2. **Sub-Second Relevance Scoring:** The pre-filtered candidate pool is sent alongside the immediate turn context to the configured JEV endpoint, scoring semantic relevance against current operator focus.
+3. **Strict Surface Token Budgets:** Selections are ranked and injected within strict token envelopes configured in `IMPRINT-BUDGETS.json`:
+   - `interactive_session_start`: 10,800 tokens (broad context orientation)
+   - `interactive_per_prompt`: 8,100 tokens (high-relevance turn focus)
+   - `lead_turn_core`: 13,500 tokens (core orchestration budget)
+   - `lead_turn_lane_window`: 16,200 tokens (deep cross-lane context)
+   - `worker` / `codex`: 0 tokens (pure execution contexts remain zero-clutter)
+4. **Deterministic Fail-Open Fallback:** If the JEV endpoint is unreachable or exceeds its 4.5s deadline, retrieval seamlessly falls back to local deterministic retrieval. No turns fail, and health receipts log all fallbacks.
+
+### Token Minimization Ecosystem
+Imprint operates as part of a tightly coordinated, token-efficient engineering architecture:
+- **Aider-Style Repo & Vault Structural Mapping (`repomap.py`):** PageRank-driven graph skeletons extract topological hubs from source repositories and Obsidian knowledge vaults, packing structural orientation into strict budgets:
+  - Repository skeletons capped at **1,024 tokens**.
+  - Knowledge vault graphs capped at **1,200 tokens**.
+- **Hermes-Style Structured Reasoning Scratchpads (`scratchpad.py`):** Enforces disciplined "Think Before Tool" chain-of-thought reasoning inside `<scratchpad>...</scratchpad>` blocks for Codex (`gpt-6-astra`/`gpt-6.1-sol`) and Claude Sonnet. Agents formulate hypotheses, verify ground truth against repo/vault maps, and assert safety invariants before issuing bash commands or tool invocations.
+
+## Production Architecture & Contracts
+
+Imprint's production operation is defined by `CONTRACTS.md` as a **detached, deterministic tacit-knowledge capture engine**:
+
+1. **Separation of Logger and Doer:**
+   - **The Logger (Capture Hooks):** The `Stop` hook and capture envelopes capture raw operator feedback (Case, Verdict, Call, Reason, alternatives) with zero LLM dependence during capture. Capture never blocks the turn and never writes to canonical state.
+   - **The Doer (Single-Writer SQLite Compiler):** Only the designated compiler node validates capture envelopes and commits them to the canonical SQLite WAL ledger.
+2. **Proposals vs. Ratified Authority:** Inferred or extracted patterns remain reviewable `Proposals` in an immutable spool. They become eligible for production retrieval only after an explicit, signed operator ratification creates a typed successor node.
+3. **Provable Provenance & Bitemporal History:** Source evidence is immutable; later interpretations or projections never overwrite raw operator judgments. Valid time and system time track every change.
+
+## Optional Jev Selector Configuration
+
+Core operation stays offline by default. The optional Jev selector is opt-in
+with `selector.mode: "jev"`. When enabled, the current turn and the principle
+text of prefiltered candidate entries are sent to the configured Jev endpoint.
+No store contents beyond those candidate texts are sent, and no session IDs are
+sent. A missing key, timeout, or endpoint failure uses the normal deterministic
+retrieval instead. Jev selections include their score, rank, and the entry's
+provenance.

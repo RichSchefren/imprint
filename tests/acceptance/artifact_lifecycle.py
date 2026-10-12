@@ -43,7 +43,7 @@ def main() -> int:
         call_type="correct",
         reason="Silent omission corrupts the decision.",
         capture_mechanism="explicit_cli",
-        captured_by="artifact-acceptance/3.1.2",
+        captured_by="artifact-acceptance/3.2.0",
         chosen_alternatives=["Report the failed source"],
         rejected_alternatives=["Omit the failure"],
     )

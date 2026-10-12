@@ -6,15 +6,19 @@
   "spool_retention_days": 30,
   "data_root": "/absolute/local/path/for/imprint-data",
   "hook_timeout_seconds": 10,
-  "domains": [
-    {
-      "domain_id": "example-domain",
-      "frozen": false,
-      "keywords": ["example keyword"],
-      "public_label": "Example Domain",
-      "safe_paths": ["Projects/Example"]
+  "selector": {
+    "mode": "deterministic",
+    "jev": {
+      "endpoint": "https://openrouter.ai/api/alpha/decisions",
+      "model": "typesafe/jev-1.13",
+      "api_key_env": "OPENROUTER_API_KEY",
+      "top": 20,
+      "score_floor": 0.55,
+      "timeout_seconds": 3,
+      "prefilter_keep": 150
     }
-  ],
+  },
+  "domains": [],
   "node_id": "primary",
   "operator_slug": "default"
 }

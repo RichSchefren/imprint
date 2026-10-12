@@ -166,3 +166,12 @@ Revoking consent does not silently rewrite historical evidence. If a grant uses
 `delete_on_revoke`, the associated source IDs must be purged through the same
 explicit preview-and-confirm deletion workflow so backups, exports, and residue
 can be reported honestly.
+
+## Optional Jev network boundary
+
+The core release remains offline by default. If `selector.mode` is explicitly
+set to `jev`, the current turn text and the principle text of the prefiltered
+candidate entries leave the machine for the configured endpoint. No other store
+contents and no session IDs are sent. A missing key, timeout, network failure,
+or bad response falls back to deterministic retrieval. Review the endpoint and
+its data terms before enabling this option.
