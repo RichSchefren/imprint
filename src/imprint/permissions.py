@@ -82,6 +82,9 @@ def _secure_windows_paths_native(paths: list[Path]) -> None:
         psid = ctypes.c_void_p
         advapi32.OpenProcessToken.argtypes = (wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE))
         advapi32.OpenProcessToken.restype = wintypes.BOOL
+        advapi32.OpenThreadToken.argtypes = (wintypes.HANDLE, wintypes.DWORD, wintypes.BOOL, ctypes.POINTER(wintypes.HANDLE))
+        advapi32.OpenThreadToken.restype = wintypes.BOOL
+        kernel32.GetCurrentThread.restype = wintypes.HANDLE
         advapi32.GetTokenInformation.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
         advapi32.GetTokenInformation.restype = wintypes.BOOL
         advapi32.ConvertStringSidToSidW.argtypes = (wintypes.LPCWSTR, ctypes.POINTER(psid))
@@ -115,9 +118,17 @@ def _secure_windows_paths_native(paths: list[Path]) -> None:
     def fail(call: str) -> None:
         raise _NativeAclUnavailable(f"{call} failed: WinError {ctypes.get_last_error()}")
 
+    # Use the effective identity, as WindowsIdentity.GetCurrent() in the
+    # PowerShell writer does: the thread's impersonation token when there is
+    # one, else the process token. CheckTokenMembership(None, ...) below
+    # makes the same choice, so owner and admin checks see one user.
+    error_no_token = 1008
     token = wintypes.HANDLE()
-    if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), token_query, ctypes.byref(token)):
-        fail("OpenProcessToken")
+    if not advapi32.OpenThreadToken(kernel32.GetCurrentThread(), token_query, True, ctypes.byref(token)):
+        if ctypes.get_last_error() != error_no_token:
+            fail("OpenThreadToken")
+        if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), token_query, ctypes.byref(token)):
+            fail("OpenProcessToken")
     try:
         needed = wintypes.DWORD()
         advapi32.GetTokenInformation(token, token_user, None, 0, ctypes.byref(needed))
@@ -291,9 +302,18 @@ foreach ($path in $paths) {
     # walk and this loop. Tolerate only a not-found error for a path that is
     # gone. Get-Item -Force sees a dangling link that Test-Path would miss,
     # and every refusal, including reparse-point and owner refusals, stays fatal.
-    $notFound = $_.Exception -is [Management.Automation.ItemNotFoundException] -or
-      $_.Exception -is [IO.FileNotFoundException] -or
-      $_.Exception -is [IO.DirectoryNotFoundException]
+    # .NET method calls (SetAccessControl) surface their error wrapped in
+    # MethodInvocationException; unwrap to the root cause first.
+    $root = $_.Exception
+    while ($null -ne $root.InnerException -and (
+      $root -is [Management.Automation.MethodInvocationException] -or
+      $root -is [Management.Automation.ActionPreferenceStopException] -or
+      $root -is [Reflection.TargetInvocationException])) {
+      $root = $root.InnerException
+    }
+    $notFound = $root -is [Management.Automation.ItemNotFoundException] -or
+      $root -is [IO.FileNotFoundException] -or
+      $root -is [IO.DirectoryNotFoundException]
     $stillThere = $null -ne (Get-Item -Force -LiteralPath $path -ErrorAction SilentlyContinue)
     if (-not $notFound -or $stillThere) { throw }
   }
@@ -409,22 +429,42 @@ def assert_private_file(path: Path) -> Path:
 def _private_tree_candidates(base: Path) -> list[Path]:
     """List a private tree's real files and folders, refusing anything else.
 
-    One lstat per path. Only FileNotFoundError means a concurrent writer
-    removed the path after the walk; every other error propagates.
+    Path.rglob silently skips folders it cannot read, which would let
+    secure_tree report success with a subtree unchecked. os.walk with an
+    error handler surfaces those errors. Only FileNotFoundError means a
+    concurrent writer removed the path after the walk; every other error
+    propagates. Each entry is classified before the walk descends into it.
     """
-    candidates = []
-    for path in [base, *base.rglob("*")]:
+    def classify(path: Path) -> bool:
         try:
             info = os.lstat(path)
         except FileNotFoundError:
-            continue
+            return False
         if (
             stat.S_ISLNK(info.st_mode)
             or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
             or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))
         ):
             raise OSError("refusing unsafe private state path")
-        candidates.append(path)
+        return True
+
+    def walk_error(error: OSError) -> None:
+        if not isinstance(error, FileNotFoundError):
+            raise error
+
+    candidates = [base] if classify(base) else []
+    for current, dirnames, filenames in os.walk(base, onerror=walk_error, followlinks=False):
+        kept = []
+        for name in sorted(dirnames):
+            path = Path(current) / name
+            if classify(path):
+                candidates.append(path)
+                kept.append(name)
+        dirnames[:] = kept
+        for name in sorted(filenames):
+            path = Path(current) / name
+            if classify(path):
+                candidates.append(path)
     return candidates
 
 

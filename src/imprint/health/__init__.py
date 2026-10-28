@@ -13,7 +13,7 @@ from .report import HealthInputs, HealthReport, evaluate_health
 
 _TEMP_PREFIXES = (
     ".ack-", ".backup-", ".imprint-", ".owner-", ".proposal-",
-    ".quarantine-", ".receipt-", ".restore-",
+    ".quarantine-", ".receipt-", ".restore-", ".compiler-lock-release-",
 )
 _SUPPORTED_BACKUP_RECEIPT_VERSIONS = frozenset({"1.0.0", "1.1.0"})
 

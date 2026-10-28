@@ -164,8 +164,16 @@ def _compiler_lock_directory_state(lock: Path) -> dict[str, Any]:
     # heartbeat means the writer was still running after it marked the lease.
     owner_gone = not local_owner or pid_alive is False
     marked = abandoned is not None and abandoned >= heartbeat
+    # A mark is terminal: the watchdog writes it just before os._exit, and a
+    # failed release writes it after the compile finished. So a marked lease
+    # this process holds no compile under is finished with, even though this
+    # process is still alive.
+    finished_here = (
+        local_owner and owner["pid"] == os.getpid()
+        and owner["nonce"] not in _HELD_LEASES
+    )
     reclaimable = (
-        owner_gone and marked
+        (owner_gone or finished_here) and marked
         and abandoned_age is not None and abandoned_age >= ABANDON_GRACE_SECONDS
     )
     stale = reclaimable or (owner_gone and age >= LOCK_STALE_SECONDS)
@@ -185,20 +193,45 @@ def abandon_held_compiler_leases() -> None:
     blocks every later compile until its heartbeat ages out.
     """
     leases = tuple(_HELD_LEASES.values())
-    for _owner_path, owner in leases:
-        # Set the mark first so any write still in flight on another thread
-        # that publishes after us carries it too.
-        owner["abandoned_at"] = _now()
-    if not leases or not _LEASE_GUARD.acquire(timeout=2):
+    if not leases:
         return
+    stamp = _now()
+    for _owner_path, owner in leases:
+        # Set the mark first, so a heartbeat still in flight on the stuck
+        # thread stops refreshing (see _refresh_heartbeat).
+        owner["abandoned_at"] = stamp
+    # If the stuck thread holds the guard inside a slow write, publish anyway:
+    # an unmarked lease would need manual recovery after we exit.
+    acquired = _LEASE_GUARD.acquire(timeout=2)
     try:
         for owner_path, owner in leases:
             try:
-                _write_lock_owner(owner_path, owner)
+                _publish_abandonment(owner_path, owner)
             except Exception:  # noqa: BLE001 - best effort while the process ends
                 pass
     finally:
-        _LEASE_GUARD.release()
+        if acquired:
+            _LEASE_GUARD.release()
+
+
+def _publish_abandonment(owner_path: Path, owner: dict[str, Any]) -> bool:
+    """Write this writer's abandonment mark; return True only if it is on disk.
+
+    Writes only over our own lease, never over another writer's.
+    """
+    def ours() -> dict[str, Any] | None:
+        try:
+            current = json.loads(owner_path.read_text(encoding="ascii"))
+        except (OSError, ValueError):
+            return None
+        return current if isinstance(current, dict) and current.get("nonce") == owner["nonce"] else None
+
+    owner.setdefault("abandoned_at", _now())
+    if ours() is None:
+        return False
+    _write_lock_owner(owner_path, dict(owner))
+    published = ours()
+    return published is not None and published.get("abandoned_at") == owner["abandoned_at"]
 
 
 def _refresh_heartbeat(owner_path: Path, owner: dict[str, Any]) -> None:
@@ -210,8 +243,10 @@ def _refresh_heartbeat(owner_path: Path, owner: dict[str, Any]) -> None:
             raise SafetyError("compiler lease lost; stopping before further writes") from exc
         if not isinstance(current, dict) or current.get("nonce") != owner["nonce"]:
             raise SafetyError("compiler lease lost; stopping before further writes")
+        if "abandoned_at" in owner:
+            return  # the watchdog marked this process as ending
         owner["heartbeat_at"] = _now()
-        _write_lock_owner(owner_path, owner)
+        _write_lock_owner(owner_path, dict(owner))
 
 
 def compiler_lock_state(operator_root: Path) -> dict[str, Any]:
@@ -561,15 +596,20 @@ def _release_compiler_lock(
         except (OSError, ValueError):
             time.sleep(0.25)
     else:
+        marked = False
         if owner is not None:
-            owner["abandoned_at"] = _now()
             try:
                 with _LEASE_GUARD:
-                    _write_lock_owner(owner_path, owner)
-            except Exception:  # noqa: BLE001 - the warning below still reports it
-                pass
-        print(f"imprint: compiler lock was not released and is marked abandoned: {lock}",
-              file=sys.stderr)
+                    marked = _publish_abandonment(owner_path, owner)
+            except Exception:  # noqa: BLE001 - reported below
+                marked = False
+        if marked:
+            print(f"imprint: compiler lock was not released; it is marked abandoned "
+                  f"and the next compile reclaims it: {lock}", file=sys.stderr)
+        else:
+            print(f"imprint: compiler lock was not released and could not be marked "
+                  f"abandoned; recover it with: imprint compile --recover-stale-lock "
+                  f"{nonce}", file=sys.stderr)
         return
     for _ in range(20):
         try:
@@ -588,6 +628,45 @@ def _release_compiler_lock(
         time.sleep(0.25)
     # The lease is already released; only harmless residue remains.
     print(f"imprint: released compiler lock left residue: {claimed}", file=sys.stderr)
+
+
+_RELEASE_RESIDUE_PREFIX = ".compiler-lock-release-"
+
+
+def _remove_release_residue(operator_root: Path) -> None:
+    """Remove lock directories an earlier release renamed but could not delete.
+
+    Once renamed, such a directory is no lock. Only its known contents are
+    removed; anything else is left in place for health to report.
+    """
+    for directory in operator_root.glob(f"{_RELEASE_RESIDUE_PREFIX}*"):
+        try:
+            if directory.is_symlink() or not directory.is_dir():
+                continue
+            for item in directory.iterdir():
+                if item.name == "owner.json" or (
+                    item.name.startswith(".owner.json.") and item.name.endswith(".tmp")
+                ):
+                    item.unlink(missing_ok=True)
+            directory.rmdir()
+        except OSError:
+            continue
+
+
+def _remove_unpublished_lock(lock: Path) -> None:
+    """Remove a lock directory this process created but never published.
+
+    Until owner.json exists the directory is invalid, and nobody can recover
+    it for LOCK_STALE_SECONDS, so it is still provably ours.
+    """
+    try:
+        for item in lock.iterdir():
+            if item.name.startswith(".owner.json.") and item.name.endswith(".tmp"):
+                item.unlink(missing_ok=True)
+        lock.rmdir()
+    except OSError as exc:
+        print(f"imprint: unpublished compiler lock was not removed: {lock}: {exc}",
+              file=sys.stderr)
 
 
 def compile_spools(
@@ -613,17 +692,20 @@ def compile_spools(
                 raise SafetyError("compiler lock was reclaimed by another writer") from again
         else:
             raise SafetyError(f"compiler lock already held; refusing a second writer; state={state['state']} nonce={state.get('nonce','unknown')}") from exc
-    secure_directory(lock)
     owner: dict[str, Any] | None = None
+    published = False
     try:
+        secure_directory(lock)
         owner = {
             "lock_schema_version": "1.0.0", "nonce": nonce, "pid": os.getpid(),
             "host": socket.gethostname(), "created_at": _now(), "heartbeat_at": _now(),
         }
         with _LEASE_GUARD:
             _HELD_LEASES[nonce] = (_lock_owner_path(operator_root), owner)
-            _write_lock_owner(_lock_owner_path(operator_root), owner)
+            _write_lock_owner(_lock_owner_path(operator_root), dict(owner))
+        published = True
         last_heartbeat = time.monotonic()
+        _remove_release_residue(operator_root)
         store.initialize()
         inputs = []
         producer_nodes: set[str] = set()
@@ -683,7 +765,10 @@ def compile_spools(
     finally:
         try:
             try:
-                _release_compiler_lock(operator_root, nonce, owner)
+                if published or _lock_owner_path(operator_root).exists():
+                    _release_compiler_lock(operator_root, nonce, owner)
+                else:
+                    _remove_unpublished_lock(lock)
             finally:
                 with _LEASE_GUARD:
                     _HELD_LEASES.pop(nonce, None)

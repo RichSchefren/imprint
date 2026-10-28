@@ -74,7 +74,8 @@ def test_abandoned_lease_inside_grace_is_protected(tmp_path):
 
 
 def test_abandoned_lease_with_live_owner_is_protected(tmp_path):
-    _plant(tmp_path, pid=os.getpid(), abandoned_seconds_ago=PAST_GRACE)
+    # Another live process (our parent), so the mark is still inside its run.
+    _plant(tmp_path, pid=os.getppid(), abandoned_seconds_ago=PAST_GRACE)
     state = compiler_lock_state(tmp_path)
     assert state["pid_alive"] is True
     assert state["reclaimable"] is False and state["stale"] is False
@@ -386,3 +387,170 @@ def test_windows_probe_uses_the_process_handle_not_the_exit_code(
     assert access & 0x00100000  # SYNCHRONIZE, needed for the wait
     assert kernel32.WaitForSingleObject.calls == [(42, 0)]
     assert kernel32.CloseHandle.calls == [(42,)]
+
+
+# Second review: marks, residue, and startup failures -----------------------
+
+class _BusyGuard:
+    """A lease guard another thread holds for longer than the watchdog waits."""
+
+    def acquire(self, timeout=-1):
+        return False
+
+    def release(self):
+        raise AssertionError("never acquired")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _hold(tmp_path, owner):
+    path = tmp_path / "compiler.lock" / "owner.json"
+    spool_module._HELD_LEASES[owner["nonce"]] = (path, owner)
+    return path
+
+
+def test_watchdog_publishes_the_mark_even_when_the_guard_stays_busy(tmp_path, monkeypatch):
+    lock = _plant(tmp_path, pid=os.getpid(), abandoned_seconds_ago=None)
+    owner = json.loads((lock / "owner.json").read_text(encoding="ascii"))
+    _hold(tmp_path, owner)
+    monkeypatch.setattr(spool_module, "_LEASE_GUARD", _BusyGuard())
+    try:
+        abandon_held_compiler_leases()
+    finally:
+        spool_module._HELD_LEASES.clear()
+    assert "abandoned_at" in json.loads((lock / "owner.json").read_text(encoding="ascii"))
+
+
+def test_watchdog_never_marks_another_writers_lease(tmp_path):
+    lock = _plant(tmp_path, pid=os.getpid(), abandoned_seconds_ago=None)
+    before = (lock / "owner.json").read_bytes()
+    ours = dict(json.loads(before), nonce="b" * 32)
+    _hold(tmp_path, ours)
+    try:
+        abandon_held_compiler_leases()
+    finally:
+        spool_module._HELD_LEASES.clear()
+    assert (lock / "owner.json").read_bytes() == before
+
+
+def test_heartbeat_does_not_refresh_over_the_mark(tmp_path):
+    lock = _plant(tmp_path, pid=os.getpid(), abandoned_seconds_ago=PAST_GRACE)
+    owner = json.loads((lock / "owner.json").read_text(encoding="ascii"))
+    before = (lock / "owner.json").read_bytes()
+    spool_module._refresh_heartbeat(lock / "owner.json", owner)
+    assert (lock / "owner.json").read_bytes() == before
+
+
+def test_marked_lease_this_process_finished_with_is_reclaimable(tmp_path):
+    # A release that could not rename leaves a mark; this process keeps running.
+    _plant(tmp_path, pid=os.getpid(), abandoned_seconds_ago=PAST_GRACE)
+    state = compiler_lock_state(tmp_path)
+    assert state["pid_alive"] is True and state["reclaimable"] is True
+
+
+def test_marked_lease_this_process_still_compiles_under_is_protected(tmp_path):
+    lock = _plant(tmp_path, pid=os.getpid(), abandoned_seconds_ago=PAST_GRACE)
+    _hold(tmp_path, json.loads((lock / "owner.json").read_text(encoding="ascii")))
+    try:
+        assert compiler_lock_state(tmp_path)["reclaimable"] is False
+    finally:
+        spool_module._HELD_LEASES.clear()
+
+
+def test_same_process_compiles_again_after_a_failed_release(tmp_path):
+    _plant(tmp_path, pid=os.getpid(), abandoned_seconds_ago=PAST_GRACE)
+    _compile(tmp_path)
+    assert compiler_lock_state(tmp_path)["state"] == "absent"
+
+
+def test_release_reports_when_the_mark_could_not_be_written(tmp_path, monkeypatch, capsys):
+    lock = _plant(tmp_path, pid=os.getpid(), abandoned_seconds_ago=None)
+    owner = json.loads((lock / "owner.json").read_text(encoding="ascii"))
+    monkeypatch.setattr(spool_module.time, "sleep", lambda _seconds: None)
+
+    def stuck_rename(source, destination):
+        raise PermissionError("held by a scanner")
+
+    def failing_write(path, data):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(spool_module.os, "rename", stuck_rename)
+    monkeypatch.setattr(spool_module, "replace_private", failing_write)
+    spool_module._release_compiler_lock(tmp_path, NONCE, owner)
+    err = capsys.readouterr().err
+    assert "could not be marked abandoned" in err and NONCE in err
+    assert "abandoned_at" not in json.loads((lock / "owner.json").read_text(encoding="ascii"))
+
+
+def test_compile_removes_earlier_release_residue(tmp_path):
+    residue = tmp_path / ".compiler-lock-release-0123"
+    residue.mkdir()
+    (residue / "owner.json").write_text("{}")
+    (residue / ".owner.json.abcd.tmp").write_bytes(b"{")
+    _compile(tmp_path)
+    assert not residue.exists()
+
+
+def test_compile_leaves_release_residue_with_unknown_content(tmp_path):
+    residue = tmp_path / ".compiler-lock-release-0123"
+    residue.mkdir()
+    (residue / "surprise.bin").write_bytes(b"x")
+    _compile(tmp_path)
+    assert (residue / "surprise.bin").is_file()
+
+
+def test_health_reports_release_residue(tmp_path):
+    from imprint.health import _temporary_residue
+
+    residue = tmp_path / ".compiler-lock-release-0123"
+    residue.mkdir()
+    assert residue in _temporary_residue(tmp_path)
+
+
+def test_failed_lock_hardening_leaves_no_lock(tmp_path, monkeypatch):
+    real = spool_module.secure_directory
+
+    def refuse_lock(path):
+        if path.name == "compiler.lock":
+            raise OSError("ACL write refused")
+        return real(path)
+
+    monkeypatch.setattr(spool_module, "secure_directory", refuse_lock)
+    with pytest.raises(OSError, match="ACL write refused"):
+        _compile(tmp_path)
+    assert not (tmp_path / "compiler.lock").exists()
+    assert spool_module._HELD_LEASES == {}
+
+
+def test_failed_first_owner_write_leaves_no_lock(tmp_path, monkeypatch):
+    def failing_write(path, data):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(spool_module, "replace_private", failing_write)
+    with pytest.raises(OSError, match="disk full"):
+        _compile(tmp_path)
+    assert not (tmp_path / "compiler.lock").exists()
+
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="needs POSIX permissions as non-root")
+def test_secure_tree_does_not_skip_an_unreadable_folder(tmp_path):
+    locked = tmp_path / "locked"
+    (locked / "child").mkdir(parents=True)
+    locked.chmod(0o000)
+    try:
+        with pytest.raises(PermissionError):
+            permissions._private_tree_candidates(tmp_path)
+    finally:
+        locked.chmod(0o700)
+
+
+def test_secure_tree_lists_the_whole_tree(tmp_path):
+    (tmp_path / "a" / "b").mkdir(parents=True)
+    (tmp_path / "a" / "b" / "f.json").write_bytes(b"")
+    (tmp_path / "g.json").write_bytes(b"")
+    found = {path.relative_to(tmp_path).as_posix() for path in permissions._private_tree_candidates(tmp_path)}
+    assert found == {".", "a", "a/b", "a/b/f.json", "g.json"}
