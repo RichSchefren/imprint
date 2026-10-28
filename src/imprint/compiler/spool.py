@@ -62,25 +62,29 @@ def _windows_pid_alive(pid: int) -> bool:
     from ctypes import wintypes
 
     process_query_limited_information = 0x1000
-    still_active = 259
-    error_access_denied = 5
+    synchronize = 0x00100000
+    error_invalid_parameter = 87  # OpenProcess's answer for a pid not in use
+    wait_object_0 = 0
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
     kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+    kernel32.WaitForSingleObject.restype = wintypes.DWORD
     kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
     kernel32.CloseHandle.restype = wintypes.BOOL
-    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    handle = kernel32.OpenProcess(
+        process_query_limited_information | synchronize, False, pid,
+    )
     if not handle:
-        # A live process we may not inspect is still alive; anything else
-        # (ERROR_INVALID_PARAMETER for an unused pid) means it is gone.
-        return ctypes.get_last_error() == error_access_denied
+        # Only "no such process" proves death. Access denied, resource
+        # exhaustion, or interference from security software must not let
+        # a live writer's lease be reclaimed.
+        return ctypes.get_last_error() != error_invalid_parameter
     try:
-        code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-            return True
-        return code.value == still_active
+        # A signalled process handle means the process has ended. Unlike
+        # GetExitCodeProcess, this cannot mistake an exit code of 259
+        # (STILL_ACTIVE) for a live process. A timeout or failure counts as live.
+        return kernel32.WaitForSingleObject(handle, 0) != wait_object_0
     finally:
         kernel32.CloseHandle(handle)
 
@@ -156,15 +160,22 @@ def _compiler_lock_directory_state(lock: Path) -> dict[str, Any]:
     # a matching hostname does not prove a shared pid namespace (containers,
     # sandboxes, synced stores). The exception is a lease its own process
     # declared abandoned; after a short grace that process is gone.
+    # The mark counts only when it covers the latest heartbeat; a later
+    # heartbeat means the writer was still running after it marked the lease.
     owner_gone = not local_owner or pid_alive is False
-    stale = owner_gone and (
-        age >= LOCK_STALE_SECONDS
-        or (abandoned_age is not None and abandoned_age >= ABANDON_GRACE_SECONDS)
+    marked = abandoned is not None and abandoned >= heartbeat
+    reclaimable = (
+        owner_gone and marked
+        and abandoned_age is not None and abandoned_age >= ABANDON_GRACE_SECONDS
     )
-    return {"state": "held", "stale": stale,
+    stale = reclaimable or (owner_gone and age >= LOCK_STALE_SECONDS)
+    # Only "reclaimable" leases are reclaimed automatically. An ordinary
+    # stale lease still needs explicit recovery: an old heartbeat alone does
+    # not prove the writer died (another host, a slow store, a pid namespace).
+    return {"state": "held", "stale": stale, "reclaimable": reclaimable,
             "age_seconds": age, "nonce": owner.get("nonce"), "host": owner.get("host"),
             "pid": owner.get("pid"), "local_owner": local_owner, "pid_alive": pid_alive,
-            "abandoned": abandoned is not None}
+            "abandoned": marked}
 
 
 def abandon_held_compiler_leases() -> None:
@@ -173,17 +184,34 @@ def abandon_held_compiler_leases() -> None:
     os._exit skips compile_spools' release, so without this marker the lease
     blocks every later compile until its heartbeat ages out.
     """
-    if not _LEASE_GUARD.acquire(timeout=2):
+    leases = tuple(_HELD_LEASES.values())
+    for _owner_path, owner in leases:
+        # Set the mark first so any write still in flight on another thread
+        # that publishes after us carries it too.
+        owner["abandoned_at"] = _now()
+    if not leases or not _LEASE_GUARD.acquire(timeout=2):
         return
     try:
-        for owner_path, owner in tuple(_HELD_LEASES.values()):
+        for owner_path, owner in leases:
             try:
-                owner["abandoned_at"] = _now()
                 _write_lock_owner(owner_path, owner)
             except Exception:  # noqa: BLE001 - best effort while the process ends
                 pass
     finally:
         _LEASE_GUARD.release()
+
+
+def _refresh_heartbeat(owner_path: Path, owner: dict[str, Any]) -> None:
+    """Refresh this writer's heartbeat, or stop if the lease is no longer ours."""
+    with _LEASE_GUARD:
+        try:
+            current = json.loads(owner_path.read_text(encoding="ascii"))
+        except (OSError, ValueError) as exc:
+            raise SafetyError("compiler lease lost; stopping before further writes") from exc
+        if not isinstance(current, dict) or current.get("nonce") != owner["nonce"]:
+            raise SafetyError("compiler lease lost; stopping before further writes")
+        owner["heartbeat_at"] = _now()
+        _write_lock_owner(owner_path, owner)
 
 
 def compiler_lock_state(operator_root: Path) -> dict[str, Any]:
@@ -504,38 +532,62 @@ def write_envelope(operator_root: Path, envelope: dict[str, Any]) -> Path:
 
 
 
-def _release_compiler_lock(operator_root: Path, nonce: str) -> None:
-    """Release this writer's lease, heartbeat temporaries included.
+def _release_compiler_lock(
+    operator_root: Path, nonce: str, owner: dict[str, Any] | None = None,
+) -> None:
+    """Release this writer's lease without ever leaving an ownerless lock.
 
-    Windows briefly refuses unlink/rmdir while a scanner or indexer holds a
-    handle. One silent attempt left the lease behind for every later writer,
-    so retry, and say so if the lease still could not be released.
+    The lock directory is first renamed away while owner.json still proves it
+    is ours, so a failure at any later step leaves residue, not a lock.
+    Windows briefly refuses rename and delete while a scanner or indexer holds
+    a handle, so each step retries. If the rename never succeeds, the lease is
+    marked abandoned so the next compile can reclaim it once we exit.
     """
     lock = operator_root / "compiler.lock"
     owner_path = _lock_owner_path(operator_root)
-    owner_removed = False
+    claimed = operator_root / f".compiler-lock-release-{nonce}"
     for _ in range(20):
         try:
-            if not owner_removed:
-                # No owner file means the directory is not provably ours: a
-                # new writer owns it from mkdir onward, before owner.json.
+            with _LEASE_GUARD:
+                # No owner file, or another nonce, means the directory is not
+                # provably ours: a new writer owns it from mkdir onward.
                 current = json.loads(owner_path.read_text(encoding="ascii"))
-                if current.get("nonce") != nonce:
+                if not isinstance(current, dict) or current.get("nonce") != nonce:
                     return
-                owner_path.unlink()
-                owner_removed = True
-            for item in lock.iterdir():
-                if item.name.startswith(".owner.json.") and item.name.endswith(".tmp"):
+                os.rename(lock, claimed)
+            break
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError):
+            time.sleep(0.25)
+    else:
+        if owner is not None:
+            owner["abandoned_at"] = _now()
+            try:
+                with _LEASE_GUARD:
+                    _write_lock_owner(owner_path, owner)
+            except Exception:  # noqa: BLE001 - the warning below still reports it
+                pass
+        print(f"imprint: compiler lock was not released and is marked abandoned: {lock}",
+              file=sys.stderr)
+        return
+    for _ in range(20):
+        try:
+            for item in claimed.iterdir():
+                if item.name == "owner.json" or (
+                    item.name.startswith(".owner.json.") and item.name.endswith(".tmp")
+                ):
                     item.unlink(missing_ok=True)
-            lock.rmdir()
+            claimed.rmdir()
             return
         except FileNotFoundError:
-            if not owner_removed or not lock.exists():
+            if not claimed.exists():
                 return
-        except (OSError, ValueError):
+        except OSError:
             pass
         time.sleep(0.25)
-    print(f"imprint: compiler lock was not released: {lock}", file=sys.stderr)
+    # The lease is already released; only harmless residue remains.
+    print(f"imprint: released compiler lock left residue: {claimed}", file=sys.stderr)
 
 
 def compile_spools(
@@ -551,8 +603,9 @@ def compile_spools(
         lock.mkdir()
     except FileExistsError as exc:
         state = compiler_lock_state(operator_root)
-        if state.get("stale") and state.get("nonce"):
-            # Reclaim through the same audited claim path as manual recovery.
+        if state.get("reclaimable") and state.get("nonce"):
+            # Only a lease its own process marked abandoned is reclaimed
+            # automatically, through the same audited path as manual recovery.
             recover_stale_compiler_lock(operator_root, confirmation=state["nonce"])
             try:
                 lock.mkdir()
@@ -561,14 +614,15 @@ def compile_spools(
         else:
             raise SafetyError(f"compiler lock already held; refusing a second writer; state={state['state']} nonce={state.get('nonce','unknown')}") from exc
     secure_directory(lock)
+    owner: dict[str, Any] | None = None
     try:
         owner = {
             "lock_schema_version": "1.0.0", "nonce": nonce, "pid": os.getpid(),
             "host": socket.gethostname(), "created_at": _now(), "heartbeat_at": _now(),
         }
         with _LEASE_GUARD:
-            _write_lock_owner(_lock_owner_path(operator_root), owner)
             _HELD_LEASES[nonce] = (_lock_owner_path(operator_root), owner)
+            _write_lock_owner(_lock_owner_path(operator_root), owner)
         last_heartbeat = time.monotonic()
         store.initialize()
         inputs = []
@@ -618,9 +672,7 @@ def compile_spools(
                 _write_acknowledgement(operator_root, path, envelope, result)
                 counts[result] += 1
             if time.monotonic() - last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
-                with _LEASE_GUARD:
-                    owner["heartbeat_at"] = _now()
-                    _write_lock_owner(_lock_owner_path(operator_root), owner)
+                _refresh_heartbeat(_lock_owner_path(operator_root), owner)
                 last_heartbeat = time.monotonic()
         for source_node_id in sorted(producer_nodes):
             prune_acknowledged_spools(
@@ -630,8 +682,10 @@ def compile_spools(
         return counts
     finally:
         try:
-            with _LEASE_GUARD:
-                _HELD_LEASES.pop(nonce, None)
-            _release_compiler_lock(operator_root, nonce)
+            try:
+                _release_compiler_lock(operator_root, nonce, owner)
+            finally:
+                with _LEASE_GUARD:
+                    _HELD_LEASES.pop(nonce, None)
         finally:
             secure_tree(operator_root)

@@ -147,7 +147,10 @@ def _secure_windows_paths_native(paths: list[Path]) -> None:
                 flags = inherit_to_children if directory else 0
                 # SYSTEM first: the order .NET writes, so ACEs inherited by
                 # later children come out identical to the PowerShell writer's.
-                for sid in (system, current):
+                # Running as LocalSystem, current is SYSTEM: write one ACE, as
+                # the .NET writer does when it merges identical rules.
+                sids = (system,) if advapi32.EqualSid(system, current) else (system, current)
+                for sid in sids:
                     if not advapi32.AddAccessAllowedAceEx(buffer, acl_revision, flags, full_control, sid):
                         fail("AddAccessAllowedAceEx")
                 return buffer
@@ -285,9 +288,14 @@ foreach ($path in $paths) {
   }
   } catch {
     # Another Imprint writer may remove its temporary between the Python
-    # walk and this loop. A vanished path needs no hardening; any failure on
-    # a path that still exists stays fatal.
-    if (Test-Path -LiteralPath $path) { throw }
+    # walk and this loop. Tolerate only a not-found error for a path that is
+    # gone. Get-Item -Force sees a dangling link that Test-Path would miss,
+    # and every refusal, including reparse-point and owner refusals, stays fatal.
+    $notFound = $_.Exception -is [Management.Automation.ItemNotFoundException] -or
+      $_.Exception -is [IO.FileNotFoundException] -or
+      $_.Exception -is [IO.DirectoryNotFoundException]
+    $stillThere = $null -ne (Get-Item -Force -LiteralPath $path -ErrorAction SilentlyContinue)
+    if (-not $notFound -or $stillThere) { throw }
   }
 }
 """
@@ -398,6 +406,28 @@ def assert_private_file(path: Path) -> Path:
     return target
 
 
+def _private_tree_candidates(base: Path) -> list[Path]:
+    """List a private tree's real files and folders, refusing anything else.
+
+    One lstat per path. Only FileNotFoundError means a concurrent writer
+    removed the path after the walk; every other error propagates.
+    """
+    candidates = []
+    for path in [base, *base.rglob("*")]:
+        try:
+            info = os.lstat(path)
+        except FileNotFoundError:
+            continue
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+            or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))
+        ):
+            raise OSError("refusing unsafe private state path")
+        candidates.append(path)
+    return candidates
+
+
 def secure_tree(root: Path) -> None:
     """Tighten every existing item in an Imprint-owned state tree."""
     base = Path(root)
@@ -405,15 +435,7 @@ def secure_tree(root: Path) -> None:
         raise OSError(f"refusing symlinked private directory: {base}")
     base.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIRECTORY_MODE)
     if os.name == "nt":
-        candidates = []
-        for path in [base, *base.rglob("*")]:
-            if path.is_dir() or path.is_file():
-                if path.is_symlink():
-                    raise OSError("refusing unsafe private state path")
-                candidates.append(path)
-            elif os.path.lexists(path):
-                raise OSError("refusing unsafe private state path")
-            # Otherwise a concurrent writer removed it after the walk.
+        candidates = _private_tree_candidates(base)
         _secure_windows_paths(candidates)
         _cache_hardened_windows_directories(
             [path for path in candidates if path.is_dir()]
