@@ -43,7 +43,173 @@ def assert_safe_path_chain(path: Path, *, require_leaf: bool = False) -> Path:
     return absolute
 
 
+class _NativeAclRefusal(OSError):
+    """The native writer refused private state, exactly as the script would."""
+
+
+class _NativeAclUnavailable(Exception):
+    """The native writer could not run; the PowerShell writer takes over."""
+
+
+def _secure_windows_paths_native(paths: list[Path]) -> None:
+    """Apply the PowerShell writer's exact owner/DACL policy in-process.
+
+    Same policy as _secure_windows_paths_powershell: refuse reparse points;
+    require the current user as owner (an elevated administrator may take
+    over state owned by BUILTIN\\Administrators); write a protected DACL with
+    exactly current-user and SYSTEM FullControl, inheritable on directories.
+    Only the owner (when taken over) and DACL sections are written, never the
+    SACL. Starting PowerShell cost about a second per call, and compile and
+    retrieval make tens of calls, which pushed hooks towards their watchdog.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    se_file_object = 1
+    owner_information = 0x00000001
+    dacl_information = 0x00000004
+    protected_dacl_information = 0x80000000
+    acl_revision = 2
+    full_control = 0x001F01FF
+    inherit_to_children = 0x1 | 0x2  # OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE
+    token_query = 0x0008
+    token_user = 1
+    gone = {2, 3}  # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
+
+    try:
+        advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psid = ctypes.c_void_p
+        advapi32.OpenProcessToken.argtypes = (wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE))
+        advapi32.OpenProcessToken.restype = wintypes.BOOL
+        advapi32.GetTokenInformation.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD))
+        advapi32.GetTokenInformation.restype = wintypes.BOOL
+        advapi32.ConvertStringSidToSidW.argtypes = (wintypes.LPCWSTR, ctypes.POINTER(psid))
+        advapi32.ConvertStringSidToSidW.restype = wintypes.BOOL
+        advapi32.CheckTokenMembership.argtypes = (wintypes.HANDLE, psid, ctypes.POINTER(wintypes.BOOL))
+        advapi32.CheckTokenMembership.restype = wintypes.BOOL
+        advapi32.EqualSid.argtypes = (psid, psid)
+        advapi32.EqualSid.restype = wintypes.BOOL
+        advapi32.GetLengthSid.argtypes = (psid,)
+        advapi32.GetLengthSid.restype = wintypes.DWORD
+        advapi32.InitializeAcl.argtypes = (ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD)
+        advapi32.InitializeAcl.restype = wintypes.BOOL
+        advapi32.AddAccessAllowedAceEx.argtypes = (ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, psid)
+        advapi32.AddAccessAllowedAceEx.restype = wintypes.BOOL
+        advapi32.GetNamedSecurityInfoW.argtypes = (
+            wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD, ctypes.POINTER(psid), ctypes.POINTER(psid),
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p),
+        )
+        advapi32.GetNamedSecurityInfoW.restype = wintypes.DWORD
+        advapi32.SetNamedSecurityInfoW.argtypes = (
+            wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD, psid, psid, ctypes.c_void_p, ctypes.c_void_p,
+        )
+        advapi32.SetNamedSecurityInfoW.restype = wintypes.DWORD
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel32.LocalFree.argtypes = (ctypes.c_void_p,)
+        kernel32.LocalFree.restype = ctypes.c_void_p
+    except (OSError, AttributeError) as exc:
+        raise _NativeAclUnavailable(str(exc)) from exc
+
+    def fail(call: str) -> None:
+        raise _NativeAclUnavailable(f"{call} failed: WinError {ctypes.get_last_error()}")
+
+    token = wintypes.HANDLE()
+    if not advapi32.OpenProcessToken(kernel32.GetCurrentProcess(), token_query, ctypes.byref(token)):
+        fail("OpenProcessToken")
+    try:
+        needed = wintypes.DWORD()
+        advapi32.GetTokenInformation(token, token_user, None, 0, ctypes.byref(needed))
+        user_buffer = ctypes.create_string_buffer(needed.value)
+        if not advapi32.GetTokenInformation(token, token_user, user_buffer, needed, ctypes.byref(needed)):
+            fail("GetTokenInformation")
+    finally:
+        kernel32.CloseHandle(token)
+    # TOKEN_USER starts with SID_AND_ATTRIBUTES, whose first field is the PSID.
+    current = psid(ctypes.cast(user_buffer, ctypes.POINTER(ctypes.c_void_p))[0])
+
+    system, administrators = psid(), psid()
+    if not advapi32.ConvertStringSidToSidW("S-1-5-18", ctypes.byref(system)):
+        fail("ConvertStringSidToSidW")
+    try:
+        if not advapi32.ConvertStringSidToSidW("S-1-5-32-544", ctypes.byref(administrators)):
+            fail("ConvertStringSidToSidW")
+        try:
+            elevated = wintypes.BOOL()
+            if not advapi32.CheckTokenMembership(None, administrators, ctypes.byref(elevated)):
+                fail("CheckTokenMembership")
+
+            def private_acl(directory: bool):
+                buffer = ctypes.create_string_buffer(1024)
+                if not advapi32.InitializeAcl(buffer, len(buffer), acl_revision):
+                    fail("InitializeAcl")
+                flags = inherit_to_children if directory else 0
+                # SYSTEM first: the order .NET writes, so ACEs inherited by
+                # later children come out identical to the PowerShell writer's.
+                for sid in (system, current):
+                    if not advapi32.AddAccessAllowedAceEx(buffer, acl_revision, flags, full_control, sid):
+                        fail("AddAccessAllowedAceEx")
+                return buffer
+
+            for path in paths:
+                name = str(path)
+                try:
+                    info = os.lstat(name)
+                except FileNotFoundError:
+                    continue  # removed by a concurrent writer; nothing to secure
+                if getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+                    raise _NativeAclRefusal("refusing reparse-point private state")
+                owner, descriptor = psid(), ctypes.c_void_p()
+                error = advapi32.GetNamedSecurityInfoW(
+                    name, se_file_object, owner_information, ctypes.byref(owner), None, None, None,
+                    ctypes.byref(descriptor),
+                )
+                if error in gone:
+                    continue
+                if error:
+                    raise _NativeAclUnavailable(f"GetNamedSecurityInfoW failed: WinError {error}")
+                try:
+                    take_ownership = None
+                    if not advapi32.EqualSid(owner, current):
+                        if elevated.value and advapi32.EqualSid(owner, administrators):
+                            take_ownership = current
+                        else:
+                            raise _NativeAclRefusal("refusing private state not owned by the current user")
+                finally:
+                    kernel32.LocalFree(descriptor)
+                acl = private_acl(stat.S_ISDIR(info.st_mode))
+                sections = dacl_information | protected_dacl_information
+                if take_ownership is not None:
+                    sections |= owner_information
+                error = advapi32.SetNamedSecurityInfoW(
+                    name, se_file_object, sections, take_ownership, None, acl, None,
+                )
+                if error in gone:
+                    continue
+                if error:
+                    raise _NativeAclUnavailable(f"SetNamedSecurityInfoW failed: WinError {error}")
+        finally:
+            kernel32.LocalFree(administrators)
+    finally:
+        kernel32.LocalFree(system)
+
+
 def _secure_windows_paths(paths: list[Path]) -> None:
+    """Set current-user ownership and an exact user/SYSTEM DACL."""
+    if not paths:
+        return
+    try:
+        _secure_windows_paths_native(paths)
+    except _NativeAclRefusal as exc:
+        raise OSError(f"unable to secure private Imprint state on Windows: {exc}") from exc
+    except _NativeAclUnavailable:
+        _secure_windows_paths_powershell(paths)
+        return
+    _cache_hardened_windows_directories(paths)
+
+
+def _secure_windows_paths_powershell(paths: list[Path]) -> None:
     """Set current-user ownership and an exact user/SYSTEM DACL."""
     if not paths:
         return
@@ -58,6 +224,7 @@ $utf8 = [Text.UTF8Encoding]::new($false)
 $paths = [Console]::In.ReadToEnd() | ConvertFrom-Json
 $current = [Security.Principal.WindowsIdentity]::GetCurrent().User
 foreach ($path in $paths) {
+  try {
   $item = Get-Item -Force -LiteralPath $path
   if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
     throw "refusing reparse-point private state"
@@ -116,6 +283,12 @@ foreach ($path in $paths) {
   } else {
     $item.SetAccessControl($acl)
   }
+  } catch {
+    # Another Imprint writer may remove its temporary between the Python
+    # walk and this loop. A vanished path needs no hardening; any failure on
+    # a path that still exists stays fatal.
+    if (Test-Path -LiteralPath $path) { throw }
+  }
 }
 """
     result = subprocess.run(
@@ -162,6 +335,12 @@ def secure_directory(path: Path) -> Path:
     candidates = created if created else [target]
     if os.name == "nt":
         if not created:
+            if target.absolute() in _WINDOWS_HARDENED_DIRECTORIES:
+                # Already hardened, children included, by this process. Doing it
+                # again on every write cost one PowerShell pass over every child,
+                # so each acknowledgement grew slower until a Stop-hook compile
+                # outran the hook watchdog and leaked the compiler lock.
+                return target
             # Harden existing immediate children in this same process so later
             # secure_file calls may safely rely on the directory's exact,
             # protected inheritable DACL.
@@ -226,9 +405,15 @@ def secure_tree(root: Path) -> None:
         raise OSError(f"refusing symlinked private directory: {base}")
     base.mkdir(parents=True, exist_ok=True, mode=PRIVATE_DIRECTORY_MODE)
     if os.name == "nt":
-        candidates = [base, *base.rglob("*")]
-        if any(path.is_symlink() or not (path.is_dir() or path.is_file()) for path in candidates):
-            raise OSError("refusing unsafe private state path")
+        candidates = []
+        for path in [base, *base.rglob("*")]:
+            if path.is_dir() or path.is_file():
+                if path.is_symlink():
+                    raise OSError("refusing unsafe private state path")
+                candidates.append(path)
+            elif os.path.lexists(path):
+                raise OSError("refusing unsafe private state path")
+            # Otherwise a concurrent writer removed it after the walk.
         _secure_windows_paths(candidates)
         _cache_hardened_windows_directories(
             [path for path in candidates if path.is_dir()]

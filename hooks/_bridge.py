@@ -180,6 +180,15 @@ def _deadline(action: str, stop_hook_active: bool):
         os.write(1, (json.dumps(body, sort_keys=True) + "\n").encode("utf-8"))
         if action == "stop-capture":
             os.write(2, b"Imprint Stop capture failed: hook_action_timeout\n")
+        # os._exit skips compile_spools' release. Mark any held compiler lease
+        # abandoned so the next compile can reclaim it. Look the module up
+        # rather than import it: the stuck thread may hold the import lock.
+        spool = sys.modules.get("imprint.compiler.spool")
+        if spool is not None:
+            try:
+                spool.abandon_held_compiler_leases()
+            except Exception:  # noqa: BLE001 - best effort while the process ends
+                pass
         os._exit(2 if capture_was_lost and not stop_hook_active else 0)
 
     watchdog = threading.Timer(timeout, terminate)

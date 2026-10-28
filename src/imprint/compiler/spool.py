@@ -6,6 +6,9 @@ import json
 import hashlib
 import os
 import socket
+import sys
+import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,6 +22,18 @@ from imprint.permissions import secure_directory, secure_file, secure_tree
 from imprint.store import ImprintStore
 
 LOCK_STALE_SECONDS = 300
+# Refresh the lease well inside LOCK_STALE_SECONDS without paying one private
+# file publication (a PowerShell ACL call on Windows) per compiled event.
+HEARTBEAT_INTERVAL_SECONDS = 30
+# A lease its own process marked abandoned (the Windows hook watchdog does this
+# just before os._exit) is reclaimable once this grace has passed.
+ABANDON_GRACE_SECONDS = 10
+_LEASE_FIELDS = frozenset({
+    "lock_schema_version", "nonce", "pid", "host", "created_at", "heartbeat_at",
+})
+# Leases this process holds, so the hook watchdog can mark them abandoned.
+_HELD_LEASES: dict[str, tuple[Path, dict[str, Any]]] = {}
+_LEASE_GUARD = threading.Lock()
 CAPTURE_BATCH_SIZE = 100
 INVALID_LOCK_CONFIRMATION = "RECOVER-INVALID-LOCK"
 
@@ -36,7 +51,43 @@ def _write_lock_owner(path: Path, owner: dict[str, Any]) -> None:
     replace_private(path, data)
 
 
+def _windows_pid_alive(pid: int) -> bool:
+    """Probe a local Windows process without signalling it.
+
+    os.kill(pid, 0) is not a liveness probe on Windows: signal 0 is
+    CTRL_C_EVENT, so it calls GenerateConsoleCtrlEvent, which can deliver
+    Ctrl+C or fail with SystemError instead of answering the question.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    process_query_limited_information = 0x1000
+    still_active = 259
+    error_access_denied = 5
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+    if not handle:
+        # A live process we may not inspect is still alive; anything else
+        # (ERROR_INVALID_PARAMETER for an unused pid) means it is gone.
+        return ctypes.get_last_error() == error_access_denied
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def _local_pid_alive(pid: int) -> bool:
+    if os.name == "nt":
+        return _windows_pid_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -63,12 +114,15 @@ def _compiler_lock_directory_state(lock: Path) -> dict[str, Any]:
     owner_path = lock / "owner.json"
     try:
         owner = json.loads(owner_path.read_text(encoding="ascii"))
-        if not isinstance(owner, dict) or set(owner) != {
-            "lock_schema_version", "nonce", "pid", "host", "created_at", "heartbeat_at",
-        }:
+        if not isinstance(owner, dict) or set(owner) not in (
+            _LEASE_FIELDS, _LEASE_FIELDS | {"abandoned_at"},
+        ):
             raise ValueError("lease fields are invalid")
         created = _lease_timestamp(owner["created_at"])
         heartbeat = _lease_timestamp(owner["heartbeat_at"])
+        abandoned = (
+            _lease_timestamp(owner["abandoned_at"]) if "abandoned_at" in owner else None
+        )
         valid = (
             owner["lock_schema_version"] == "1.0.0"
             and isinstance(owner["nonce"], str) and len(owner["nonce"]) == 32
@@ -77,10 +131,15 @@ def _compiler_lock_directory_state(lock: Path) -> dict[str, Any]:
             and isinstance(owner["host"], str) and bool(owner["host"].strip())
             and owner["host"] == owner["host"].strip() and "\x00" not in owner["host"]
             and heartbeat >= created
+            and (abandoned is None or abandoned >= created)
         )
         if not valid:
             raise ValueError("lease values are invalid")
         age = max(0, int((datetime.now(timezone.utc) - heartbeat).total_seconds()))
+        abandoned_age = (
+            None if abandoned is None
+            else max(0, int((datetime.now(timezone.utc) - abandoned).total_seconds()))
+        )
     except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
         try:
             age = max(0, int(datetime.now(timezone.utc).timestamp() - lock.stat().st_mtime))
@@ -93,10 +152,38 @@ def _compiler_lock_directory_state(lock: Path) -> dict[str, Any]:
         }
     local_owner = owner["host"] == socket.gethostname()
     pid_alive = _local_pid_alive(owner["pid"]) if local_owner else None
-    stale = age >= LOCK_STALE_SECONDS and (not local_owner or pid_alive is False)
+    # A fresh heartbeat protects the lease even when the pid looks dead here:
+    # a matching hostname does not prove a shared pid namespace (containers,
+    # sandboxes, synced stores). The exception is a lease its own process
+    # declared abandoned; after a short grace that process is gone.
+    owner_gone = not local_owner or pid_alive is False
+    stale = owner_gone and (
+        age >= LOCK_STALE_SECONDS
+        or (abandoned_age is not None and abandoned_age >= ABANDON_GRACE_SECONDS)
+    )
     return {"state": "held", "stale": stale,
             "age_seconds": age, "nonce": owner.get("nonce"), "host": owner.get("host"),
-            "pid": owner.get("pid"), "local_owner": local_owner, "pid_alive": pid_alive}
+            "pid": owner.get("pid"), "local_owner": local_owner, "pid_alive": pid_alive,
+            "abandoned": abandoned is not None}
+
+
+def abandon_held_compiler_leases() -> None:
+    """Mark this process's leases abandoned; call only just before os._exit.
+
+    os._exit skips compile_spools' release, so without this marker the lease
+    blocks every later compile until its heartbeat ages out.
+    """
+    if not _LEASE_GUARD.acquire(timeout=2):
+        return
+    try:
+        for owner_path, owner in tuple(_HELD_LEASES.values()):
+            try:
+                owner["abandoned_at"] = _now()
+                _write_lock_owner(owner_path, owner)
+            except Exception:  # noqa: BLE001 - best effort while the process ends
+                pass
+    finally:
+        _LEASE_GUARD.release()
 
 
 def compiler_lock_state(operator_root: Path) -> dict[str, Any]:
@@ -129,6 +216,10 @@ def recover_stale_compiler_lock(operator_root: Path, *, confirmation: str) -> di
     def owned_temporary(name: str) -> bool:
         if not name.endswith(".tmp"):
             return False
+        if name.startswith(".owner.json."):
+            # replace_private's temporary for the lease heartbeat, left behind
+            # when a writer is killed mid-refresh.
+            return True
         if nonce:
             return name == f".owner-{nonce}.tmp" or name.startswith(f".owner-{nonce}-")
         prefix = name.removeprefix(".owner-").split("-", 1)[0]
@@ -412,6 +503,41 @@ def write_envelope(operator_root: Path, envelope: dict[str, Any]) -> Path:
     return final
 
 
+
+def _release_compiler_lock(operator_root: Path, nonce: str) -> None:
+    """Release this writer's lease, heartbeat temporaries included.
+
+    Windows briefly refuses unlink/rmdir while a scanner or indexer holds a
+    handle. One silent attempt left the lease behind for every later writer,
+    so retry, and say so if the lease still could not be released.
+    """
+    lock = operator_root / "compiler.lock"
+    owner_path = _lock_owner_path(operator_root)
+    owner_removed = False
+    for _ in range(20):
+        try:
+            if not owner_removed:
+                # No owner file means the directory is not provably ours: a
+                # new writer owns it from mkdir onward, before owner.json.
+                current = json.loads(owner_path.read_text(encoding="ascii"))
+                if current.get("nonce") != nonce:
+                    return
+                owner_path.unlink()
+                owner_removed = True
+            for item in lock.iterdir():
+                if item.name.startswith(".owner.json.") and item.name.endswith(".tmp"):
+                    item.unlink(missing_ok=True)
+            lock.rmdir()
+            return
+        except FileNotFoundError:
+            if not owner_removed or not lock.exists():
+                return
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.25)
+    print(f"imprint: compiler lock was not released: {lock}", file=sys.stderr)
+
+
 def compile_spools(
     operator_root: Path, store: ImprintStore, *, compiler_authorized: bool,
     retention_days: int = 30, batch_size: int = CAPTURE_BATCH_SIZE,
@@ -425,14 +551,25 @@ def compile_spools(
         lock.mkdir()
     except FileExistsError as exc:
         state = compiler_lock_state(operator_root)
-        raise SafetyError(f"compiler lock already held; refusing a second writer; state={state['state']} nonce={state.get('nonce','unknown')}") from exc
+        if state.get("stale") and state.get("nonce"):
+            # Reclaim through the same audited claim path as manual recovery.
+            recover_stale_compiler_lock(operator_root, confirmation=state["nonce"])
+            try:
+                lock.mkdir()
+            except FileExistsError as again:
+                raise SafetyError("compiler lock was reclaimed by another writer") from again
+        else:
+            raise SafetyError(f"compiler lock already held; refusing a second writer; state={state['state']} nonce={state.get('nonce','unknown')}") from exc
     secure_directory(lock)
     try:
         owner = {
             "lock_schema_version": "1.0.0", "nonce": nonce, "pid": os.getpid(),
             "host": socket.gethostname(), "created_at": _now(), "heartbeat_at": _now(),
         }
-        _write_lock_owner(_lock_owner_path(operator_root), owner)
+        with _LEASE_GUARD:
+            _write_lock_owner(_lock_owner_path(operator_root), owner)
+            _HELD_LEASES[nonce] = (_lock_owner_path(operator_root), owner)
+        last_heartbeat = time.monotonic()
         store.initialize()
         inputs = []
         producer_nodes: set[str] = set()
@@ -480,8 +617,11 @@ def compile_spools(
                 # propagate so callers never claim canonical success without proof.
                 _write_acknowledgement(operator_root, path, envelope, result)
                 counts[result] += 1
-            owner["heartbeat_at"] = _now()
-            _write_lock_owner(_lock_owner_path(operator_root), owner)
+            if time.monotonic() - last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
+                with _LEASE_GUARD:
+                    owner["heartbeat_at"] = _now()
+                    _write_lock_owner(_lock_owner_path(operator_root), owner)
+                last_heartbeat = time.monotonic()
         for source_node_id in sorted(producer_nodes):
             prune_acknowledged_spools(
                 operator_root, source_node_id=source_node_id,
@@ -490,11 +630,8 @@ def compile_spools(
         return counts
     finally:
         try:
-            owner_path = _lock_owner_path(operator_root)
-            current = json.loads(owner_path.read_text(encoding="ascii"))
-            if current.get("nonce") == nonce:
-                owner_path.unlink()
-                lock.rmdir()
-        except (FileNotFoundError, OSError, json.JSONDecodeError):
-            pass
-        secure_tree(operator_root)
+            with _LEASE_GUARD:
+                _HELD_LEASES.pop(nonce, None)
+            _release_compiler_lock(operator_root, nonce)
+        finally:
+            secure_tree(operator_root)
